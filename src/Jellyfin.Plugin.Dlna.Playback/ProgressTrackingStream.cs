@@ -10,6 +10,7 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Session;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Dlna.Playback;
 
@@ -23,6 +24,7 @@ public class ProgressTrackingStream : Stream
     private readonly User _user;
     private readonly long _totalLength;
     private readonly long _durationTicks;
+    private readonly Microsoft.Extensions.Logging.ILogger _logger;
 
     private long _bytesRead;
     private long _lastReportedTicks;
@@ -38,7 +40,8 @@ public class ProgressTrackingStream : Stream
         string sessionId,
         BaseItem item,
         User user,
-        long totalLength)
+        long totalLength,
+        Microsoft.Extensions.Logging.ILogger logger)
     {
         _innerStream = innerStream;
         _sessionManager = sessionManager;
@@ -48,6 +51,7 @@ public class ProgressTrackingStream : Stream
         _user = user;
         _totalLength = totalLength;
         _durationTicks = item.RunTimeTicks ?? 0;
+        _logger = logger;
 
         if (_innerStream.CanSeek && _innerStream.Length > 0)
         {
@@ -163,6 +167,7 @@ public class ProgressTrackingStream : Stream
         // Report progress every 10 seconds (10,000,000 ticks) or if sought backward
         if (Math.Abs(currentPositionTicks - _lastReportedTicks) > 10000000)
         {
+            _logger.LogInformation("DLNA ProgressTrackingStream reporting progress {Ticks} for {SessionId}", currentPositionTicks, _sessionId);
             _lastReportedTicks = currentPositionTicks;
             _sessionManager.OnPlaybackProgress(new PlaybackProgressInfo
             {
@@ -190,6 +195,7 @@ public class ProgressTrackingStream : Stream
             }
             finally
             {
+                _logger.LogInformation("DLNA ProgressTrackingStream reporting stopped at {Ticks} for {SessionId}", _currentPositionTicks, _sessionId);
                 _ = _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
                 {
                     ItemId = _item.Id,
@@ -214,6 +220,7 @@ public class ProgressTrackingStream : Stream
             {
                 try
                 {
+                    _logger.LogInformation("DLNA ProgressTrackingStream reporting stopped async at {Ticks} for {SessionId}", _currentPositionTicks, _sessionId);
                     await _sessionManager.OnPlaybackStopped(new PlaybackStopInfo { ItemId = _item.Id, SessionId = _sessionId, PositionTicks = _currentPositionTicks }).ConfigureAwait(false);
                 }
                 catch

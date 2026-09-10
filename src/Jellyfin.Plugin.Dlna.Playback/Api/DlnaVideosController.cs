@@ -20,6 +20,7 @@ using MediaBrowser.Model.Net;
 using MediaBrowser.Model.Session;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Dlna.Playback.Api;
 
@@ -41,6 +42,7 @@ public class DlnaVideosController : ControllerBase
     private readonly EncodingHelper _encodingHelper;
     private readonly MediaBrowser.Controller.Session.ISessionManager _sessionManager;
     private readonly IUserDataManager _userDataManager;
+    private readonly Microsoft.Extensions.Logging.ILogger<DlnaVideosController> _logger;
 
     private readonly TranscodingJobType _transcodingJobType = TranscodingJobType.Progressive;
 
@@ -59,6 +61,7 @@ public class DlnaVideosController : ControllerBase
     /// <param name="encodingHelper">Instance of <see cref="EncodingHelper"/>.</param>
     /// <param name="sessionManager">Instance of <see cref="MediaBrowser.Controller.Session.ISessionManager"/>.</param>
     /// <param name="userDataManager">Instance of <see cref="IUserDataManager"/>.</param>
+    /// <param name="logger">Instance of <see cref="Microsoft.Extensions.Logging.ILogger"/>.</param>
     public DlnaVideosController(
         ILibraryManager libraryManager,
         IUserManager userManager,
@@ -71,7 +74,8 @@ public class DlnaVideosController : ControllerBase
         IHttpClientFactory httpClientFactory,
         EncodingHelper encodingHelper,
         MediaBrowser.Controller.Session.ISessionManager sessionManager,
-        IUserDataManager userDataManager)
+        IUserDataManager userDataManager,
+        Microsoft.Extensions.Logging.ILogger<DlnaVideosController> logger)
     {
         _libraryManager = libraryManager;
         _userManager = userManager;
@@ -85,6 +89,7 @@ public class DlnaVideosController : ControllerBase
         _encodingHelper = encodingHelper;
         _sessionManager = sessionManager;
         _userDataManager = userDataManager;
+        _logger = logger;
     }
 
     /// <summary>
@@ -558,9 +563,11 @@ public class DlnaVideosController : ControllerBase
 
         long totalLength = state.MediaSource.Size ?? 0;
 
+        _logger.LogInformation("DLNA Stream started. Item: {ItemId}, SessionId: {SessionId}, Length: {TotalLength}", itemId, sessionId, totalLength);
+
         if (result is FileStreamResult fsr)
         {
-            fsr.FileStream = new ProgressTrackingStream(fsr.FileStream, _sessionManager, _userDataManager, sessionId, item, user, totalLength);
+            fsr.FileStream = new ProgressTrackingStream(fsr.FileStream, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger);
             return fsr;
         }
 
@@ -571,7 +578,7 @@ public class DlnaVideosController : ControllerBase
             var entityTag = new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{lastModified.ToFileTime():x}-{fileInfo.Length:x}\"");
 
             var fs = new System.IO.FileStream(pfr.FileName, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
-            var trackingStream = new ProgressTrackingStream(fs, _sessionManager, _userDataManager, sessionId, item, user, totalLength);
+            var trackingStream = new ProgressTrackingStream(fs, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger);
             return new FileStreamResult(trackingStream, pfr.ContentType)
             {
                 EnableRangeProcessing = pfr.EnableRangeProcessing,
