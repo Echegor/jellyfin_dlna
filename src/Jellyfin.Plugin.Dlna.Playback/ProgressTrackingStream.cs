@@ -148,15 +148,15 @@ public class ProgressTrackingStream : Stream
             _bytesRead += bytesRead;
         }
 
-        if (currentPositionTicks > 0)
-        {
-            _currentPositionTicks = currentPositionTicks;
-        }
-
         // Ignore progress updates if the stream has been open for less than 3 seconds (likely a metadata probe)
         if (_stopwatch.Elapsed.TotalSeconds < 3)
         {
             return;
+        }
+
+        if (currentPositionTicks > 0)
+        {
+            _currentPositionTicks = currentPositionTicks;
         }
 
         if (currentPositionTicks <= 0)
@@ -195,13 +195,32 @@ public class ProgressTrackingStream : Stream
             }
             finally
             {
-                _logger.LogInformation("DLNA ProgressTrackingStream reporting stopped at {Ticks} for {SessionId}", _currentPositionTicks, _sessionId);
-                _ = _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
+                try
                 {
-                    ItemId = _item.Id,
-                    SessionId = _sessionId,
-                    PositionTicks = _currentPositionTicks
-                });
+                    _logger.LogInformation("DLNA ProgressTrackingStream reporting stopped at {Ticks} for {SessionId}", _currentPositionTicks, _sessionId);
+                    
+                    if (true)
+                    {
+                        var userData = _userDataManager.GetUserData(_user, _item);
+                        if (userData != null)
+                        {
+                        _userDataManager.UpdatePlayState(_item, userData, _currentPositionTicks);
+                        _userDataManager.SaveUserData(_user, _item, userData, MediaBrowser.Model.Entities.UserDataSaveReason.PlaybackProgress, CancellationToken.None);
+                        _logger.LogInformation("DLNA ProgressTrackingStream manually saved UserData for {Username} at {Ticks}", _user.Username, _currentPositionTicks);
+                        }
+                    }
+
+                    _ = _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
+                    {
+                        ItemId = _item.Id,
+                        SessionId = _sessionId,
+                        PositionTicks = _currentPositionTicks
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error reporting playback stopped for DLNA session {SessionId}", _sessionId);
+                }
             }
         }
 
@@ -221,10 +240,23 @@ public class ProgressTrackingStream : Stream
                 try
                 {
                     _logger.LogInformation("DLNA ProgressTrackingStream reporting stopped async at {Ticks} for {SessionId}", _currentPositionTicks, _sessionId);
+                    
+                    if (true)
+                    {
+                        var userData = _userDataManager.GetUserData(_user, _item);
+                        if (userData != null)
+                        {
+                        _userDataManager.UpdatePlayState(_item, userData, _currentPositionTicks);
+                        _userDataManager.SaveUserData(_user, _item, userData, MediaBrowser.Model.Entities.UserDataSaveReason.PlaybackProgress, CancellationToken.None);
+                        _logger.LogInformation("DLNA ProgressTrackingStream manually saved UserData for {Username} at {Ticks}", _user.Username, _currentPositionTicks);
+                        }
+                    }
+
                     await _sessionManager.OnPlaybackStopped(new PlaybackStopInfo { ItemId = _item.Id, SessionId = _sessionId, PositionTicks = _currentPositionTicks }).ConfigureAwait(false);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.LogError(ex, "Error reporting playback stopped for DLNA session {SessionId}", _sessionId);
                 }
             }
         }
