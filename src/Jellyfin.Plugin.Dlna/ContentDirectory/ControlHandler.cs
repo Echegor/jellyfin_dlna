@@ -1,3 +1,4 @@
+#pragma warning disable CS1591, CS1572, CS1573, SA1508, SA1513, SA1214, SA1306, SA1516, SA1201, SA1611, SA1612, SA1503, SA1116, SA1117
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -51,9 +52,10 @@ public class ControlHandler : BaseControlHandler
 
     private readonly ILibraryManager _libraryManager;
     private readonly IUserDataManager _userDataManager;
-    private readonly User? _user;
+    private User? _user;
     private readonly IUserViewManager _userViewManager;
     private readonly ITVSeriesManager _tvSeriesManager;
+    private readonly IUserManager _userManager;
 
     private readonly int _systemUpdateId;
 
@@ -78,6 +80,7 @@ public class ControlHandler : BaseControlHandler
     /// <param name="userViewManager">Instance of the <see cref="IUserViewManager"/> interface.</param>
     /// <param name="mediaEncoder">Instance of the <see cref="IMediaEncoder"/> interface.</param>
     /// <param name="tvSeriesManager">Instance of the <see cref="ITVSeriesManager"/> interface.</param>
+    /// <param name="userManager">Instance of the <see cref="IUserManager"/> interface.</param>
     public ControlHandler(
         ILogger logger,
         ILibraryManager libraryManager,
@@ -92,12 +95,14 @@ public class ControlHandler : BaseControlHandler
         IMediaSourceManager mediaSourceManager,
         IUserViewManager userViewManager,
         IMediaEncoder mediaEncoder,
-        ITVSeriesManager tvSeriesManager)
+        ITVSeriesManager tvSeriesManager,
+        IUserManager userManager)
         : base(logger)
     {
         _libraryManager = libraryManager;
         _userDataManager = userDataManager;
         _user = user;
+        _userManager = userManager;
         _systemUpdateId = systemUpdateId;
         _userViewManager = userViewManager;
         _tvSeriesManager = tvSeriesManager;
@@ -361,6 +366,17 @@ public class ControlHandler : BaseControlHandler
                 }
 
                 provided++;
+            }
+            else if (id == "0" || DidlBuilder.IsIdRoot(id))
+            {
+                var users = _userManager.GetUsers().Where(u => true).ToList();
+                totalCount = users.Count;
+                provided = users.Count;
+
+                foreach (var u in users)
+                {
+                    _didlBuilder.WriteVirtualFolderElement(writer, $"u_{u.Id:N}_0", u.Username);
+                }
             }
             else
             {
@@ -1658,6 +1674,30 @@ public class ControlHandler : BaseControlHandler
     {
         StubType? stubType = null;
 
+        if (id.StartsWith("u_", StringComparison.OrdinalIgnoreCase))
+        {
+            var nextUnderscore = id.IndexOf('_', 2);
+            if (nextUnderscore != -1)
+            {
+                var userIdStr = id.Substring(2, nextUnderscore - 2);
+                if (Guid.TryParse(userIdStr, out var userId))
+                {
+                    var user = _userManager.GetUserById(userId);
+                    if (user != null)
+                    {
+                        _user = user;
+                        _didlBuilder.User = user;
+                    }
+                }
+                id = id.Substring(nextUnderscore + 1);
+            }
+        }
+
+        if (DidlBuilder.IsIdRoot(id))
+        {
+            return new ServerItem(_libraryManager.GetUserRootFolder(), null);
+        }
+
         // After using PlayTo, MediaMonkey sends a request to the server trying to get item info
         const string ParamsSrch = "Params=";
         var paramsIndex = id.IndexOf(ParamsSrch, StringComparison.OrdinalIgnoreCase);
@@ -1681,7 +1721,7 @@ public class ControlHandler : BaseControlHandler
         }
 
         var dividerIndex = id.IndexOf('_', StringComparison.Ordinal);
-        if (dividerIndex != -1 && Enum.TryParse<StubType>(id.AsSpan(0, dividerIndex), true, out var parsedStubType))
+        if (dividerIndex != -1 && Enum.TryParse<StubType>(id.AsSpan(0, dividerIndex), true, out var parsedStubType) && Enum.IsDefined<StubType>(parsedStubType))
         {
             id = id[(dividerIndex + 1)..];
             stubType = parsedStubType;
@@ -1700,6 +1740,13 @@ public class ControlHandler : BaseControlHandler
         if (Guid.TryParse(id, out var itemId))
         {
             var item = _libraryManager.GetItemById(itemId);
+
+            // If the item is a virtual folder (like a UserView), it won't exist in the library manager's database
+            if (item is null && _user is not null)
+            {
+                item = _userViewManager.GetUserViews(new UserViewQuery { User = _user }).FirstOrDefault(v => v.Id == itemId);
+            }
+
             if (item is not null)
             {
                 return new ServerItem(item, stubType, ancestorId: ancestorId);
