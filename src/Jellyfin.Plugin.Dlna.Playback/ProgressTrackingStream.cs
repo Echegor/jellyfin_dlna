@@ -165,7 +165,7 @@ public class ProgressTrackingStream : Stream
         }
 
         // Report progress every 10 seconds (10,000,000 ticks) or if sought backward
-        if (Math.Abs(currentPositionTicks - _lastReportedTicks) > 10000000)
+        if (Math.Abs(currentPositionTicks - _lastReportedTicks) > 100000000)
         {
             _logger.LogInformation("DLNA ProgressTrackingStream reporting progress {Ticks} for {SessionId}", currentPositionTicks, _sessionId);
             _lastReportedTicks = currentPositionTicks;
@@ -199,7 +199,7 @@ public class ProgressTrackingStream : Stream
                 {
                     _logger.LogInformation("DLNA ProgressTrackingStream reporting stopped at {Ticks} for {SessionId}", _currentPositionTicks, _sessionId);
                     
-                    if (true)
+                    if (_currentPositionTicks > 0)
                     {
                         var userData = _userDataManager.GetUserData(_user, _item);
                         if (userData != null)
@@ -241,7 +241,7 @@ public class ProgressTrackingStream : Stream
                 {
                     _logger.LogInformation("DLNA ProgressTrackingStream reporting stopped async at {Ticks} for {SessionId}", _currentPositionTicks, _sessionId);
                     
-                    if (true)
+                    if (_currentPositionTicks > 0)
                     {
                         var userData = _userDataManager.GetUserData(_user, _item);
                         if (userData != null)
