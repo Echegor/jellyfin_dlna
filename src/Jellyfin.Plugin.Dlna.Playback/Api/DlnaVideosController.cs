@@ -292,7 +292,7 @@ public class DlnaVideosController : ControllerBase
             var liveStream = new ProgressiveFileStream(liveStreamInfo.GetStream());
             // TODO (moved from MediaBrowser.Api): Don't hardcode contentType
             var result = File(liveStream, MimeTypes.GetMimeType("file.ts"));
-            return WrapWithProgressTracking(result, state, userId, isHeadRequest, itemId);
+            return await WrapWithProgressTracking(result, state, userId, isHeadRequest, itemId).ConfigureAwait(false);
         }
 
         // Static remote stream
@@ -302,7 +302,7 @@ public class DlnaVideosController : ControllerBase
 
             var httpClient = _httpClientFactory.CreateClient(NamedClient.Default);
             var result = await FileStreamResponseHelpers.GetStaticRemoteStreamResult(state, httpClient, HttpContext).ConfigureAwait(false);
-            return WrapWithProgressTracking(result, state, userId, isHeadRequest, itemId);
+            return await WrapWithProgressTracking(result, state, userId, isHeadRequest, itemId).ConfigureAwait(false);
         }
 
         if (@static.HasValue && @static.Value && state.InputProtocol != MediaProtocol.File)
@@ -328,13 +328,13 @@ public class DlnaVideosController : ControllerBase
             if (state.MediaSource.IsInfiniteStream)
             {
                 var liveStream = new ProgressiveFileStream(state.MediaPath, null, _transcodingJobHelper);
-                return WrapWithProgressTracking(File(liveStream, contentType), state, userId, isHeadRequest, itemId);
+                return await WrapWithProgressTracking(File(liveStream, contentType), state, userId, isHeadRequest, itemId).ConfigureAwait(false);
             }
 
             var result = FileStreamResponseHelpers.GetStaticFileResult(
                 state.MediaPath,
                 contentType);
-            return WrapWithProgressTracking(result, state, userId, isHeadRequest, itemId);
+            return await WrapWithProgressTracking(result, state, userId, isHeadRequest, itemId).ConfigureAwait(false);
         }
 
         // Need to start ffmpeg (because media can't be returned directly)
@@ -348,7 +348,7 @@ public class DlnaVideosController : ControllerBase
             ffmpegCommandLineArguments,
             _transcodingJobType,
             cancellationTokenSource).ConfigureAwait(false);
-        return WrapWithProgressTracking(transcodeResult, state, userId, isHeadRequest, itemId);
+        return await WrapWithProgressTracking(transcodeResult, state, userId, isHeadRequest, itemId).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -520,7 +520,7 @@ public class DlnaVideosController : ControllerBase
             streamOptions);
     }
 
-    private ActionResult WrapWithProgressTracking(ActionResult result, StreamState state, Guid? userId, bool isHeadRequest, Guid itemId)
+    private async Task<ActionResult> WrapWithProgressTracking(ActionResult result, StreamState state, Guid? userId, bool isHeadRequest, Guid itemId)
     {
         if (isHeadRequest || userId == null)
         {
@@ -539,19 +539,23 @@ public class DlnaVideosController : ControllerBase
             return result;
         }
 
-        string sessionId = Request.Query["PlaySessionId"].ToString();
-        if (string.IsNullOrEmpty(sessionId))
-        {
-            sessionId = Guid.NewGuid().ToString("N");
-        }
-
         string client = "DLNA";
         string deviceName = "DLNA Client";
         string deviceId = state.Request.DeviceId ?? "DLNA-" + Request.HttpContext.Connection.RemoteIpAddress;
 
-        _sessionManager.LogSessionActivity(client, "1.0.0", deviceId, deviceName, Request.HttpContext.Connection.RemoteIpAddress?.ToString(), user);
+        var sessionInfo = await _sessionManager.LogSessionActivity(client, "1.0.0", deviceId, deviceName, Request.HttpContext.Connection.RemoteIpAddress?.ToString(), user).ConfigureAwait(false);
 
-        _sessionManager.OnPlaybackStart(new PlaybackStartInfo
+        string sessionId = sessionInfo?.Id ?? string.Empty;
+        if (string.IsNullOrEmpty(sessionId))
+        {
+            sessionId = Request.Query["PlaySessionId"].ToString();
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                sessionId = Guid.NewGuid().ToString("N");
+            }
+        }
+
+        await _sessionManager.OnPlaybackStart(new PlaybackStartInfo
         {
             ItemId = itemId,
             SessionId = sessionId,
@@ -559,7 +563,7 @@ public class DlnaVideosController : ControllerBase
             IsPaused = false,
             PlayMethod = state.Request.Static ? MediaBrowser.Model.Session.PlayMethod.DirectStream : MediaBrowser.Model.Session.PlayMethod.Transcode,
             MediaSourceId = state.MediaSource.Id
-        });
+        }).ConfigureAwait(false);
 
         long totalLength = state.MediaSource.Size ?? 0;
 
