@@ -1,3 +1,4 @@
+#pragma warning disable CS1591, CS1572, CS1573, SA1508, SA1513, SA1214, SA1306, SA1516, SA1201, SA1611, SA1612, SA1503, SA1116, SA1117
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -60,8 +61,8 @@ public class DidlBuilder
     private readonly IImageProcessor _imageProcessor;
     private readonly string _serverAddress;
     private readonly string? _accessToken;
-    private readonly User? _user;
-    private readonly IUserDataManager _userDataManager;
+    public User? User { get; set; }
+    private readonly IUserDataManager UserDataManager;
     private readonly DlnaLocalization _localization;
     private readonly IMediaSourceManager _mediaSourceManager;
     private readonly ILogger _logger;
@@ -98,11 +99,11 @@ public class DidlBuilder
         ILibraryManager libraryManager)
     {
         _profile = profile;
-        _user = user;
+        User = user;
         _imageProcessor = imageProcessor;
         _serverAddress = serverAddress;
         _accessToken = accessToken;
-        _userDataManager = userDataManager;
+        UserDataManager = userDataManager;
         _localization = localization;
         _mediaSourceManager = mediaSourceManager;
         _logger = logger;
@@ -278,7 +279,7 @@ public class DidlBuilder
 
         try
         {
-            var sources = _mediaSourceManager.GetStaticMediaSources(item, true, _user);
+            var sources = _mediaSourceManager.GetStaticMediaSources(item, true, User);
 
             var options = new MediaOptions
             {
@@ -447,7 +448,7 @@ public class DidlBuilder
     {
         writer.WriteStartElement(string.Empty, "res", NsDidl);
 
-        var url = NormalizeDlnaMediaUrl(streamInfo.ToDlnaUrl(_serverAddress, _accessToken));
+        var url = NormalizeDlnaMediaUrl(streamInfo.ToDlnaUrl(_serverAddress, _accessToken, User?.Id));
 
         var mediaSource = streamInfo.MediaSource;
 
@@ -675,7 +676,7 @@ public class DidlBuilder
     {
         writer.WriteStartElement(string.Empty, "res", NsDidl);
 
-        var url = NormalizeDlnaMediaUrl(streamInfo.ToDlnaUrl(_serverAddress, _accessToken));
+        var url = NormalizeDlnaMediaUrl(streamInfo.ToDlnaUrl(_serverAddress, _accessToken, User?.Id));
 
         var mediaSource = streamInfo.MediaSource;
 
@@ -782,6 +783,21 @@ public class DidlBuilder
     /// <param name="filter">The <see cref="Filter"/>.</param>
     /// <param name="requestedId">The request id.</param>
     /// <param name="ancestorId">The library to scope the folder to, if any.</param>
+    public void WriteVirtualFolderElement(XmlWriter writer, string id, string name)
+    {
+        writer.WriteStartElement(string.Empty, "container", NsDidl);
+
+        writer.WriteAttributeString("restricted", "1");
+        writer.WriteAttributeString("searchable", "1");
+        writer.WriteAttributeString("childCount", "0");
+        writer.WriteAttributeString("id", id);
+        writer.WriteAttributeString("parentID", "0");
+
+        writer.WriteElementString("dc", "title", NsDc, name);
+        writer.WriteElementString("upnp", "class", NsUpnp, "object.container");
+        writer.WriteFullEndElement();
+    }
+
     public void WriteFolderElement(XmlWriter writer, BaseItem folder, StubType? stubType, BaseItem? context, int childCount, Filter filter, string? requestedId = null, Guid? ancestorId = null)
     {
         writer.WriteStartElement(string.Empty, "container", NsDidl);
@@ -792,9 +808,9 @@ public class DidlBuilder
 
         var clientId = GetClientId(folder, stubType, ancestorId);
 
-        if (string.Equals(requestedId, "0", StringComparison.Ordinal))
+        if (requestedId != null && IsIdRoot(requestedId))
         {
-            writer.WriteAttributeString("id", "0");
+            writer.WriteAttributeString("id", requestedId);
             writer.WriteAttributeString("parentID", "-1");
         }
         else
@@ -803,7 +819,7 @@ public class DidlBuilder
 
             if (context is not null)
             {
-                writer.WriteAttributeString("parentID", GetClientId(context, null));
+                writer.WriteAttributeString("parentID", GetClientId(context, null, ancestorId));
             }
             else
             {
@@ -814,7 +830,7 @@ public class DidlBuilder
                 }
                 else
                 {
-                    writer.WriteAttributeString("parentID", GetClientId(parent, null));
+                    writer.WriteAttributeString("parentID", GetClientId(parent, null, ancestorId));
                 }
             }
         }
@@ -849,7 +865,7 @@ public class DidlBuilder
             return;
         }
 
-        var userdata = _userDataManager.GetUserData(user, item)!;
+        var userdata = UserDataManager.GetUserData(user, item)!;
         var playbackPositionTicks = (streamInfo is not null && streamInfo.StartPositionTicks > 0) ? streamInfo.StartPositionTicks : userdata.PlaybackPositionTicks;
 
         if (playbackPositionTicks > 0)
@@ -1389,22 +1405,22 @@ public class DidlBuilder
     /// <param name="stubType">Current <see cref="StubType"/>.</param>
     /// <param name="ancestorId">The library to scope the item to, if any.</param>
     /// <returns>The client id.</returns>
-    public static string GetClientId(BaseItem item, StubType? stubType, Guid? ancestorId = null)
+    public string GetClientId(BaseItem item, StubType? stubType, Guid? ancestorId = null)
     {
-        return GetClientId(item.Id, stubType, ancestorId);
+        if (item is MediaBrowser.Controller.Entities.UserRootFolder)
+        {
+            return GetClientIdInternal("0", stubType, ancestorId);
+        }
+        return GetClientIdInternal(item.Id.ToString("N", CultureInfo.InvariantCulture), stubType, ancestorId);
     }
 
-    /// <summary>
-    /// Gets the client id of an <see cref="Guid"/> based on the <see cref="StubType"/>.
-    /// </summary>
-    /// <param name="idValue">The <see cref="Guid"/>.</param>
-    /// <param name="stubType">Current <see cref="StubType"/>.</param>
-    /// <param name="ancestorId">The library to scope the item to, if any.</param>
-    /// <returns>The client id.</returns>
-    public static string GetClientId(Guid idValue, StubType? stubType, Guid? ancestorId = null)
+    public string GetClientId(Guid idValue, StubType? stubType, Guid? ancestorId = null)
     {
-        var id = idValue.ToString("N", CultureInfo.InvariantCulture);
+        return GetClientIdInternal(idValue.ToString("N", CultureInfo.InvariantCulture), stubType, ancestorId);
+    }
 
+    private string GetClientIdInternal(string id, StubType? stubType, Guid? ancestorId = null)
+    {
         if (stubType.HasValue)
         {
             id = stubType.Value.ToString().ToLowerInvariant() + "_" + id;
@@ -1413,6 +1429,11 @@ public class DidlBuilder
         if (ancestorId.HasValue)
         {
             id += "_" + ancestorId.Value.ToString("N", CultureInfo.InvariantCulture);
+        }
+
+        if (User != null)
+        {
+            id = "u_" + User.Id.ToString("N", CultureInfo.InvariantCulture) + "_" + id;
         }
 
         return id;

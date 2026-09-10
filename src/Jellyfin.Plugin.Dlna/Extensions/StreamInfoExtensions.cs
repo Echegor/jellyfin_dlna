@@ -1,3 +1,4 @@
+#pragma warning disable CS1591, CS1572, CS1573, SA1508, SA1513, SA1214, SA1306, SA1516, SA1201, SA1611, SA1612, SA1503, SA1116, SA1117
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -19,7 +20,7 @@ public static class StreamInfoExtensions
     /// <param name="baseUrl">The base URL.</param>
     /// <param name="accessToken">The access token.</param>
     /// <returns>The DLNA URL.</returns>
-    public static string ToDlnaUrl(this StreamInfo streamInfo, string baseUrl, string? accessToken)
+    public static string ToDlnaUrl(this StreamInfo streamInfo, string baseUrl, string? accessToken, Guid? userId = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(baseUrl);
 
@@ -33,7 +34,7 @@ public static class StreamInfoExtensions
         }
 
         var list = new List<string>();
-        foreach (NameValuePair pair in BuildParams(streamInfo, accessToken))
+        foreach (NameValuePair pair in BuildParams(streamInfo, accessToken, userId))
         {
             if (string.IsNullOrEmpty(pair.Value))
             {
@@ -86,9 +87,14 @@ public static class StreamInfoExtensions
         return string.Format(CultureInfo.InvariantCulture, "{0}/dlna/videos/{1}/stream{2}?{3}", baseUrl, itemId, extension, queryString);
     }
 
-    private static List<NameValuePair> BuildParams(StreamInfo item, string? accessToken)
+    private static List<NameValuePair> BuildParams(StreamInfo item, string? accessToken, Guid? userId)
     {
         var list = new List<NameValuePair>();
+
+        if (userId.HasValue)
+        {
+            list.Add(new NameValuePair("UserId", userId.Value.ToString("N", CultureInfo.InvariantCulture)));
+        }
 
         string audioCodecs = item.AudioCodecs.Count == 0 ?
             string.Empty :

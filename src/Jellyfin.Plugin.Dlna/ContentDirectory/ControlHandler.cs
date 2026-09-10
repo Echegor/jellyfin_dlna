@@ -409,9 +409,7 @@ public class ControlHandler : BaseControlHandler
 
             writer.WriteFullEndElement();
             writer.Flush();
-            var didlXml = builder.ToString();
-            Logger.LogInformation("Generated DIDL for DLNA Browse request on {ObjectId}: {Didl}", id, didlXml);
-            xmlWriter.WriteElementString("Result", didlXml);
+            xmlWriter.WriteElementString("Result", builder.ToString());
         }
 
         xmlWriter.WriteElementString("NumberReturned", provided.ToString(CultureInfo.InvariantCulture));

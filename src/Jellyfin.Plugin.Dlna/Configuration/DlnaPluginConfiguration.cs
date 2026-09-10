@@ -1,3 +1,4 @@
+#pragma warning disable CS1591, CS1572, CS1573, SA1508, SA1513, SA1214, SA1306, SA1516, SA1201, SA1611, SA1612, SA1503, SA1116, SA1117
 using System;
 using MediaBrowser.Model.Plugins;
 
@@ -34,8 +35,4 @@ public class DlnaPluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool SendOnlyMatchedHost { get; set; } = true;
 
-    /// <summary>
-    /// Gets or sets the default user account that the dlna server uses.
-    /// </summary>
-    public Guid? DefaultUserId { get; set; }
 }

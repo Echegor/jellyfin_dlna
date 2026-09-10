@@ -17,6 +17,7 @@ using MediaBrowser.Model.Dlna;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.MediaInfo;
 using MediaBrowser.Model.Net;
+using MediaBrowser.Model.Session;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -38,6 +39,8 @@ public class DlnaVideosController : ControllerBase
     private readonly ITranscodeManager _transcodingJobHelper;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly EncodingHelper _encodingHelper;
+    private readonly MediaBrowser.Controller.Session.ISessionManager _sessionManager;
+    private readonly IUserDataManager _userDataManager;
 
     private readonly TranscodingJobType _transcodingJobType = TranscodingJobType.Progressive;
 
@@ -54,6 +57,8 @@ public class DlnaVideosController : ControllerBase
     /// <param name="transcodingJobHelper">Instance of the <see cref="ITranscodeManager"/> class.</param>
     /// <param name="httpClientFactory">Instance of the <see cref="IHttpClientFactory"/> interface.</param>
     /// <param name="encodingHelper">Instance of <see cref="EncodingHelper"/>.</param>
+    /// <param name="sessionManager">Instance of <see cref="MediaBrowser.Controller.Session.ISessionManager"/>.</param>
+    /// <param name="userDataManager">Instance of <see cref="IUserDataManager"/>.</param>
     public DlnaVideosController(
         ILibraryManager libraryManager,
         IUserManager userManager,
@@ -64,7 +69,9 @@ public class DlnaVideosController : ControllerBase
         IDeviceManager deviceManager,
         ITranscodeManager transcodingJobHelper,
         IHttpClientFactory httpClientFactory,
-        EncodingHelper encodingHelper)
+        EncodingHelper encodingHelper,
+        MediaBrowser.Controller.Session.ISessionManager sessionManager,
+        IUserDataManager userDataManager)
     {
         _libraryManager = libraryManager;
         _userManager = userManager;
@@ -76,6 +83,8 @@ public class DlnaVideosController : ControllerBase
         _transcodingJobHelper = transcodingJobHelper;
         _httpClientFactory = httpClientFactory;
         _encodingHelper = encodingHelper;
+        _sessionManager = sessionManager;
+        _userDataManager = userDataManager;
     }
 
     /// <summary>
@@ -131,6 +140,7 @@ public class DlnaVideosController : ControllerBase
     /// <param name="audioStreamIndex">Optional. The index of the audio stream to use. If omitted the first audio stream will be used.</param>
     /// <param name="videoStreamIndex">Optional. The index of the video stream to use. If omitted the first video stream will be used.</param>
     /// <param name="context">Optional. The <see cref="EncodingContext"/>.</param>
+    /// <param name="userId">Optional. The user id.</param>
     /// <param name="streamOptions">Optional. The streaming options.</param>
     /// <response code="200">Video stream returned.</response>
     /// <returns>A <see cref="FileResult"/> containing the audio file.</returns>
@@ -188,6 +198,7 @@ public class DlnaVideosController : ControllerBase
         [FromQuery] int? audioStreamIndex,
         [FromQuery] int? videoStreamIndex,
         [FromQuery] EncodingContext? context,
+        [FromQuery] Guid? userId,
         [FromQuery] Dictionary<string, string> streamOptions)
     {
         var isHeadRequest = Request.Method == System.Net.WebRequestMethods.Http.Head;
@@ -275,7 +286,8 @@ public class DlnaVideosController : ControllerBase
 
             var liveStream = new ProgressiveFileStream(liveStreamInfo.GetStream());
             // TODO (moved from MediaBrowser.Api): Don't hardcode contentType
-            return File(liveStream, MimeTypes.GetMimeType("file.ts"));
+            var result = File(liveStream, MimeTypes.GetMimeType("file.ts"));
+            return WrapWithProgressTracking(result, state, userId, isHeadRequest, itemId);
         }
 
         // Static remote stream
@@ -284,7 +296,8 @@ public class DlnaVideosController : ControllerBase
             StreamingHelpers.AddDlnaHeaders(state, Response.Headers, true, state.Request.StartTimeTicks, Request, _dlnaManager);
 
             var httpClient = _httpClientFactory.CreateClient(NamedClient.Default);
-            return await FileStreamResponseHelpers.GetStaticRemoteStreamResult(state, httpClient, HttpContext).ConfigureAwait(false);
+            var result = await FileStreamResponseHelpers.GetStaticRemoteStreamResult(state, httpClient, HttpContext).ConfigureAwait(false);
+            return WrapWithProgressTracking(result, state, userId, isHeadRequest, itemId);
         }
 
         if (@static.HasValue && @static.Value && state.InputProtocol != MediaProtocol.File)
@@ -310,18 +323,19 @@ public class DlnaVideosController : ControllerBase
             if (state.MediaSource.IsInfiniteStream)
             {
                 var liveStream = new ProgressiveFileStream(state.MediaPath, null, _transcodingJobHelper);
-                return File(liveStream, contentType);
+                return WrapWithProgressTracking(File(liveStream, contentType), state, userId, isHeadRequest, itemId);
             }
 
-            return FileStreamResponseHelpers.GetStaticFileResult(
+            var result = FileStreamResponseHelpers.GetStaticFileResult(
                 state.MediaPath,
                 contentType);
+            return WrapWithProgressTracking(result, state, userId, isHeadRequest, itemId);
         }
 
         // Need to start ffmpeg (because media can't be returned directly)
         var encodingOptions = _serverConfigurationManager.GetEncodingOptions();
         var ffmpegCommandLineArguments = _encodingHelper.GetProgressiveVideoFullCommandLine(state, encodingOptions, EncoderPreset.superfast);
-        return await FileStreamResponseHelpers.GetTranscodedFile(
+        var transcodeResult = await FileStreamResponseHelpers.GetTranscodedFile(
             state,
             isHeadRequest,
             HttpContext,
@@ -329,6 +343,7 @@ public class DlnaVideosController : ControllerBase
             ffmpegCommandLineArguments,
             _transcodingJobType,
             cancellationTokenSource).ConfigureAwait(false);
+        return WrapWithProgressTracking(transcodeResult, state, userId, isHeadRequest, itemId);
     }
 
     /// <summary>
@@ -384,6 +399,7 @@ public class DlnaVideosController : ControllerBase
     /// <param name="audioStreamIndex">Optional. The index of the audio stream to use. If omitted the first audio stream will be used.</param>
     /// <param name="videoStreamIndex">Optional. The index of the video stream to use. If omitted the first video stream will be used.</param>
     /// <param name="context">Optional. The <see cref="EncodingContext"/>.</param>
+    /// <param name="userId">Optional. The user id.</param>
     /// <param name="streamOptions">Optional. The streaming options.</param>
     /// <response code="200">Video stream returned.</response>
     /// <returns>A <see cref="FileResult"/> containing the audio file.</returns>
@@ -441,6 +457,7 @@ public class DlnaVideosController : ControllerBase
         [FromQuery] int? audioStreamIndex,
         [FromQuery] int? videoStreamIndex,
         [FromQuery] EncodingContext? context,
+        [FromQuery] Guid? userId,
         [FromQuery] Dictionary<string, string> streamOptions)
     {
         return GetVideoStream(
@@ -494,6 +511,75 @@ public class DlnaVideosController : ControllerBase
             audioStreamIndex,
             videoStreamIndex,
             context,
+            userId,
             streamOptions);
+    }
+
+    private ActionResult WrapWithProgressTracking(ActionResult result, StreamState state, Guid? userId, bool isHeadRequest, Guid itemId)
+    {
+        if (isHeadRequest || userId == null)
+        {
+            return result;
+        }
+
+        var user = _userManager.GetUserById(userId.Value);
+        if (user == null)
+        {
+            return result;
+        }
+
+        var item = _libraryManager.GetItemById(itemId);
+        if (item == null)
+        {
+            return result;
+        }
+
+        string sessionId = Request.Query["PlaySessionId"].ToString();
+        if (string.IsNullOrEmpty(sessionId))
+        {
+            sessionId = Guid.NewGuid().ToString("N");
+        }
+
+        string client = "DLNA";
+        string deviceName = "DLNA Client";
+        string deviceId = state.Request.DeviceId ?? "DLNA-" + Request.HttpContext.Connection.RemoteIpAddress;
+
+        _sessionManager.LogSessionActivity(client, "1.0.0", deviceId, deviceName, Request.HttpContext.Connection.RemoteIpAddress?.ToString(), user);
+
+        _sessionManager.OnPlaybackStart(new PlaybackStartInfo
+        {
+            ItemId = itemId,
+            SessionId = sessionId,
+            PositionTicks = state.Request.StartTimeTicks ?? 0,
+            IsPaused = false,
+            PlayMethod = state.Request.Static ? MediaBrowser.Model.Session.PlayMethod.DirectStream : MediaBrowser.Model.Session.PlayMethod.Transcode,
+            MediaSourceId = state.MediaSource.Id
+        });
+
+        long totalLength = state.MediaSource.Size ?? 0;
+
+        if (result is FileStreamResult fsr)
+        {
+            fsr.FileStream = new ProgressTrackingStream(fsr.FileStream, _sessionManager, _userDataManager, sessionId, item, user, totalLength);
+            return fsr;
+        }
+
+        if (result is PhysicalFileResult pfr)
+        {
+            var fileInfo = new System.IO.FileInfo(pfr.FileName);
+            var lastModified = new DateTimeOffset(fileInfo.LastWriteTimeUtc);
+            var entityTag = new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{lastModified.ToFileTime():x}-{fileInfo.Length:x}\"");
+
+            var fs = new System.IO.FileStream(pfr.FileName, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
+            var trackingStream = new ProgressTrackingStream(fs, _sessionManager, _userDataManager, sessionId, item, user, totalLength);
+            return new FileStreamResult(trackingStream, pfr.ContentType)
+            {
+                EnableRangeProcessing = pfr.EnableRangeProcessing,
+                EntityTag = entityTag,
+                LastModified = lastModified
+            };
+        }
+
+        return result;
     }
 }

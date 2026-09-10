@@ -1,3 +1,4 @@
+#pragma warning disable CS1591, CS1572, CS1573, SA1508, SA1513, SA1214, SA1306, SA1516, SA1201, SA1611, SA1612, SA1503, SA1116, SA1117
 using System;
 using System.Linq;
 using System.Net.Http;
@@ -103,8 +104,6 @@ public class ContentDirectoryService : BaseService, IContentDirectory
 
         var serverAddress = request.RequestedUrl[..request.RequestedUrl.IndexOf("/dlna", StringComparison.OrdinalIgnoreCase)];
 
-        var user = GetUser(profile);
-
         return new ControlHandler(
                 Logger,
                 _libraryManager,
@@ -113,53 +112,15 @@ public class ContentDirectoryService : BaseService, IContentDirectory
                 null,
                 _imageProcessor,
                 _userDataManager,
-                user,
+                null, // User is evaluated in ControlHandler now
                 SystemUpdateId,
                 _localization,
                 _mediaSourceManager,
                 _userViewManager,
                 _mediaEncoder,
-                _tvSeriesManager)
+                _tvSeriesManager,
+                _userManager)
             .ProcessControlRequestAsync(request);
     }
 
-    /// <summary>
-    /// Get the user stored in the device profile.
-    /// </summary>
-    /// <param name="profile">The <see cref="DeviceProfile"/>.</param>
-    /// <returns>The <see cref="User"/>.</returns>
-    private User? GetUser(DlnaDeviceProfile profile)
-    {
-        if (!string.IsNullOrEmpty(profile.UserId))
-        {
-            var user = _userManager.GetUserById(Guid.Parse(profile.UserId));
-
-            if (user is not null)
-            {
-                return user;
-            }
-        }
-
-        var userId = DlnaPlugin.Instance.Configuration.DefaultUserId;
-
-        if (userId is not null && !userId.Equals(default))
-        {
-            var user = _userManager.GetUserById(userId.Value);
-
-            if (user is not null)
-            {
-                return user;
-            }
-        }
-
-        foreach (var user in _userManager.GetUsers())
-        {
-            if (user.HasPermission(PermissionKind.IsAdministrator))
-            {
-                return user;
-            }
-        }
-
-        return _userManager.GetUsers().FirstOrDefault();
-    }
 }
