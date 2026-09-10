@@ -1672,6 +1672,8 @@ public class ControlHandler : BaseControlHandler
     /// <returns>The corresponding <see cref="ServerItem"/>.</returns>
     private ServerItem ParseItemId(string id)
     {
+        Logger.LogInformation("ParseItemId started for incoming DLNA id: {Id}", id);
+        var originalId = id;
         StubType? stubType = null;
 
         if (id.StartsWith("u_", StringComparison.OrdinalIgnoreCase))
@@ -1741,10 +1743,18 @@ public class ControlHandler : BaseControlHandler
         {
             var item = _libraryManager.GetItemById(itemId);
 
+            if (item is not null)
+            {
+                Logger.LogInformation("ParseItemId successfully resolved {OriginalId} to physical library item {ItemName} (Id: {ItemId})", originalId, item.Name, itemId);
+            }
             // If the item is a virtual folder (like a UserView), it won't exist in the library manager's database
-            if (item is null && _user is not null)
+            else if (_user is not null)
             {
                 item = _userViewManager.GetUserViews(new UserViewQuery { User = _user }).FirstOrDefault(v => v.Id == itemId);
+                if (item is not null)
+                {
+                    Logger.LogInformation("ParseItemId successfully resolved {OriginalId} to virtual user view {ItemName} (Id: {ItemId})", originalId, item.Name, itemId);
+                }
             }
 
             if (item is not null)
@@ -1753,7 +1763,7 @@ public class ControlHandler : BaseControlHandler
             }
         }
 
-        Logger.LogError("Error parsing item Id: {Id}. Returning user root folder.", id);
+        Logger.LogError("Error parsing item Id: {Id} from Original Id: {OriginalId}. Returning user root folder.", id, originalId);
 
         return new ServerItem(_libraryManager.GetUserRootFolder(), null);
     }
