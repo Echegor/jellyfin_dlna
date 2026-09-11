@@ -14,6 +14,18 @@ To solve this, we completely modified how DLNA serves content:
 
 Because of these changes, any playback over DLNA behaves exactly like playback on an official web or mobile app — preserving progress, marking items as played, and allowing Suggestarr to do its job.
 
+## Installation & Version Pinning (99.99.99)
+
+To install this custom fork:
+1. Go to the **[Releases](https://github.com/Echegor/jellyfin_dlna/releases)** page of this repository.
+2. Download the `jellyfin-plugin-dlna-custom-12.0.zip` file.
+3. Extract the contents (`.dll` files) directly into your Jellyfin plugins directory (usually `/config/plugins/DLNA/`).
+4. Restart your Jellyfin server.
+
+> [!NOTE]
+> **Why is the version `99.99.99`?**
+> We deliberately hardcoded this plugin's version to `99.99.99` in the assembly manifest. This ensures that Jellyfin's automatic plugin updater catalog will *never* see an upstream version that is mathematically higher than ours. This guarantees that your Jellyfin server won't accidentally overwrite our custom stateful DLNA logic with the official stateless upstream version during a routine plugin update.
+
 ---
 
 <h3 align="center">Original Upstream Documentation</h3>
