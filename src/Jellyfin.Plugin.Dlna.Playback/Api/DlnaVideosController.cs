@@ -522,20 +522,31 @@ public class DlnaVideosController : ControllerBase
 
     private async Task<ActionResult> WrapWithProgressTracking(ActionResult result, StreamState state, Guid? userId, bool isHeadRequest, Guid itemId)
     {
+        var requestId = HttpContext.TraceIdentifier;
+        _logger.LogDebug("DLNA trace request={RequestId} item={ItemId} user={UserId} method={Method} range={Range} result={Result} startTicks={StartTicks} static={Static}", requestId, itemId, userId, Request.Method, Request.Headers.Range.ToString(), result.GetType().Name, state.Request.StartTimeTicks, state.Request.Static);
+        HttpContext.Response.OnCompleted(() =>
+        {
+            _logger.LogDebug("DLNA trace request={RequestId} response-completed status={Status} contentRange={ContentRange} contentLength={ContentLength} aborted={Aborted}", requestId, Response.StatusCode, Response.Headers.ContentRange.ToString(), Response.ContentLength, HttpContext.RequestAborted.IsCancellationRequested);
+            return Task.CompletedTask;
+        });
+
         if (isHeadRequest || userId == null)
         {
+            _logger.LogDebug("DLNA trace request={RequestId} tracking-skipped head={Head} missingUser={MissingUser}", requestId, isHeadRequest, userId == null);
             return result;
         }
 
         var user = _userManager.GetUserById(userId.Value);
         if (user == null)
         {
+            _logger.LogDebug("DLNA trace request={RequestId} tracking-skipped reason=user-not-found", requestId);
             return result;
         }
 
         var item = _libraryManager.GetItemById(itemId);
         if (item == null)
         {
+            _logger.LogDebug("DLNA trace request={RequestId} tracking-skipped reason=item-not-found", requestId);
             return result;
         }
 
@@ -555,6 +566,7 @@ public class DlnaVideosController : ControllerBase
             }
         }
 
+        _logger.LogDebug("DLNA trace request={RequestId} session={SessionId} action=OnPlaybackStart before nowPlaying={NowPlaying} ticks={Ticks}", requestId, sessionId, sessionInfo?.NowPlayingItem?.Id, sessionInfo?.PlayState?.PositionTicks);
         await _sessionManager.OnPlaybackStart(new PlaybackStartInfo
         {
             ItemId = itemId,
@@ -565,13 +577,14 @@ public class DlnaVideosController : ControllerBase
             MediaSourceId = state.MediaSource.Id
         }).ConfigureAwait(false);
 
+        _logger.LogDebug("DLNA trace request={RequestId} session={SessionId} action=OnPlaybackStart completed nowPlaying={NowPlaying} ticks={Ticks}", requestId, sessionId, sessionInfo?.NowPlayingItem?.Id, sessionInfo?.PlayState?.PositionTicks);
         long totalLength = state.MediaSource.Size ?? 0;
 
         _logger.LogInformation("DLNA Stream started. Item: {ItemId}, SessionId: {SessionId}, Length: {TotalLength}", itemId, sessionId, totalLength);
 
         if (result is FileStreamResult fsr)
         {
-            fsr.FileStream = new ProgressTrackingStream(fsr.FileStream, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger);
+            fsr.FileStream = new ProgressTrackingStream(fsr.FileStream, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger, requestId, HttpContext.RequestAborted);
             return fsr;
         }
 
@@ -584,7 +597,7 @@ public class DlnaVideosController : ControllerBase
             var fs = new System.IO.FileStream(pfr.FileName, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
             try
             {
-                var trackingStream = new ProgressTrackingStream(fs, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger);
+                var trackingStream = new ProgressTrackingStream(fs, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger, requestId, HttpContext.RequestAborted);
                 return new FileStreamResult(trackingStream, pfr.ContentType)
                 {
                     EnableRangeProcessing = pfr.EnableRangeProcessing,

@@ -26,6 +26,47 @@ To install this custom fork:
 > **Why is the version `99.99.99`?**
 > We deliberately hardcoded this plugin's version to `99.99.99` in the assembly manifest. This ensures that Jellyfin's automatic plugin updater catalog will *never* see an upstream version that is mathematically higher than ours. This guarantees that your Jellyfin server won't accidentally overwrite our custom stateful DLNA logic with the official stateless upstream version during a routine plugin update.
 
+## Playback diagnostics
+
+Playback diagnostics use the existing `Debug` log level. In Jellyfin's active
+logging configuration, merge this entry into `Serilog.MinimumLevel.Override`
+(preserve the other settings):
+
+```json
+"Jellyfin.Plugin.Dlna.Playback": "Debug"
+```
+
+Restart Jellyfin after installing the diagnostic build and applying the logging
+configuration. Set this override to `Information` to silence the diagnostic
+messages again; the instrumentation can remain installed. Report failures are
+logged at `Error` even when debug logging is disabled.
+
+Search the Jellyfin log for `DLNA trace`. All events include an HTTP `request`
+identifier; tracked streams also include the shared Jellyfin `session` identifier.
+The diagnostics record request ranges, response status/content range, seeks,
+first read, end of stream, disposal, elapsed time, bytes read, cancellation state,
+progress report submission/completion/failure, session now-playing state, and saved
+resume/played values. Full URLs, access tokens, and general request headers are
+not logged. There is no log entry for every data buffer.
+
+To reproduce, use one phone and one video, note the time, play for about a minute,
+seek once, then stop. Note when the browser's playing indicator disappears and
+whether refreshing changes it. Keep the complete interval of `DLNA trace` entries
+and any errors, preferably from the file log with millisecond timestamps.
+
+Different request IDs with the same session ID and overlapping `stream-open` to
+`dispose` intervals establish concurrent HTTP requests from that session. Compare
+`report-before`/`report-after` and `OnPlaybackStart` snapshots to see whether the
+session item or position changes as another request finishes. Snapshots are
+observations of shared state, not proof that a particular callback caused a change.
+A request ending is not proof that the viewer stopped watching. Byte-derived
+`estimatedTicks` measure downloaded data, not the phone's actual playback clock.
+
+This instrumentation preserves the current reporting behavior, including the
+existing progress report on disposal; it does not restore stop notifications or
+change probe handling. The former “reporting stopped” log label was misleading
+because the current implementation calls `OnPlaybackProgress` there.
+
 ---
 
 <h3 align="center">Original Upstream Documentation</h3>
