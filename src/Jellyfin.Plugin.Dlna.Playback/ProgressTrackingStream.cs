@@ -30,7 +30,6 @@ public class ProgressTrackingStream : Stream
     private long _lastReportedTicks;
     private long _currentPositionTicks;
 
-    private readonly System.Diagnostics.Stopwatch _stopwatch = System.Diagnostics.Stopwatch.StartNew();
     private int _disposed;
 
     public ProgressTrackingStream(
@@ -148,12 +147,6 @@ public class ProgressTrackingStream : Stream
             Interlocked.Add(ref _bytesRead, bytesRead);
         }
 
-        // Ignore progress updates if the stream has been open for less than 3 seconds (likely a metadata probe)
-        if (_stopwatch.Elapsed.TotalSeconds < 3)
-        {
-            return;
-        }
-
         if (currentPositionTicks > 0)
         {
             Interlocked.Exchange(ref _currentPositionTicks, currentPositionTicks);
@@ -169,8 +162,8 @@ public class ProgressTrackingStream : Stream
         {
             _logger.LogDebug("DLNA ProgressTrackingStream reporting progress {Ticks} for {SessionId}", currentPositionTicks, _sessionId);
             _lastReportedTicks = currentPositionTicks;
-            
-            #pragma warning disable CS4014 // Fire and forget is intentional
+
+#pragma warning disable CS4014 // Fire and forget is intentional
             _sessionManager.OnPlaybackProgress(new PlaybackProgressInfo
             {
                 ItemId = _item.Id,
@@ -178,7 +171,7 @@ public class ProgressTrackingStream : Stream
                 SessionId = _sessionId,
                 IsPaused = false
             });
-            #pragma warning restore CS4014
+#pragma warning restore CS4014
         }
     }
 
@@ -201,7 +194,7 @@ public class ProgressTrackingStream : Stream
                 try
                 {
                     _logger.LogInformation("DLNA ProgressTrackingStream reporting stopped at {Ticks} for {SessionId}", _currentPositionTicks, _sessionId);
-                    
+
                     if (_currentPositionTicks > 0)
                     {
                         var userData = _userDataManager.GetUserData(_user, _item);
@@ -213,12 +206,15 @@ public class ProgressTrackingStream : Stream
                         }
                     }
 
-                    _ = _sessionManager.OnPlaybackStopped(new PlaybackStopInfo
+#pragma warning disable CS4014
+                    _sessionManager.OnPlaybackProgress(new PlaybackProgressInfo
                     {
                         ItemId = _item.Id,
                         SessionId = _sessionId,
-                        PositionTicks = _currentPositionTicks
+                        PositionTicks = _currentPositionTicks,
+                        IsPaused = false
                     });
+#pragma warning restore CS4014
                 }
                 catch (Exception ex)
                 {
@@ -243,7 +239,7 @@ public class ProgressTrackingStream : Stream
                 try
                 {
                     _logger.LogInformation("DLNA ProgressTrackingStream reporting stopped async at {Ticks} for {SessionId}", _currentPositionTicks, _sessionId);
-                    
+
                     if (_currentPositionTicks > 0)
                     {
                         var userData = _userDataManager.GetUserData(_user, _item);
@@ -255,7 +251,9 @@ public class ProgressTrackingStream : Stream
                         }
                     }
 
-                    await _sessionManager.OnPlaybackStopped(new PlaybackStopInfo { ItemId = _item.Id, SessionId = _sessionId, PositionTicks = _currentPositionTicks }).ConfigureAwait(false);
+#pragma warning disable CS4014
+                    _sessionManager.OnPlaybackProgress(new PlaybackProgressInfo { ItemId = _item.Id, SessionId = _sessionId, PositionTicks = _currentPositionTicks, IsPaused = false });
+#pragma warning restore CS4014
                 }
                 catch (Exception ex)
                 {
