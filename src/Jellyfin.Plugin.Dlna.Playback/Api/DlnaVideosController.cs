@@ -582,13 +582,21 @@ public class DlnaVideosController : ControllerBase
             var entityTag = new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{lastModified.ToFileTime():x}-{fileInfo.Length:x}\"");
 
             var fs = new System.IO.FileStream(pfr.FileName, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
-            var trackingStream = new ProgressTrackingStream(fs, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger);
-            return new FileStreamResult(trackingStream, pfr.ContentType)
+            try
             {
-                EnableRangeProcessing = pfr.EnableRangeProcessing,
-                EntityTag = entityTag,
-                LastModified = lastModified
-            };
+                var trackingStream = new ProgressTrackingStream(fs, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger);
+                return new FileStreamResult(trackingStream, pfr.ContentType)
+                {
+                    EnableRangeProcessing = pfr.EnableRangeProcessing,
+                    EntityTag = entityTag,
+                    LastModified = lastModified
+                };
+            }
+            catch
+            {
+                await fs.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
         }
 
         return result;
