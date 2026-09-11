@@ -3,16 +3,16 @@
 > **⚠️ CUSTOM FORK**: This is a specialized fork of the official Jellyfin DLNA plugin pinned to **Jellyfin 12.0**.
 
 ## Why this exists
-The official DLNA protocol is completely stateless, meaning that watching a movie on a Smart TV via DLNA will not update your "Continue Watching" progress or mark the file as played inside Jellyfin. This behavior breaks downstream services like **Suggestarr**, which rely on proper play states to curate new content.
+When a device browses Jellyfin and pulls a video over DLNA, its HTTP requests do not provide the playback feedback available from a Jellyfin client. This fork adds user selection and conservative estimated resume tracking for those requests.
 
 ## What we changed
 To solve this, we completely modified how DLNA serves content:
 
 1. **Virtual User Picker as Root**: We altered the DLNA directory structure so that the absolute root folder is a "User Picker". Before seeing any media, the TV user must select their Jellyfin profile.
 2. **User Context Propagation**: Once a user is selected, their User ID is injected into the DLNA metadata and passed along as a `?userId=` query parameter to all streaming URLs.
-3. **Stateful Progress Tracking**: We intercept the video streaming responses and wrap them in a custom `ProgressTrackingStream`. This monitors exactly how many bytes are read, calculates the exact time in the movie (ticks), and reports progress natively to Jellyfin's `SessionManager` and `UserDataManager`.
+3. **Estimated Progress Tracking**: A shared coordinator tracks qualified file reads per user/device and reports an inferred playback session. Older HTTP requests cannot overwrite a newer qualified seek. Resume positions use elapsed time bounded by downloaded data; they are estimates, particularly with variable bitrate files.
 
-Because of these changes, any playback over DLNA behaves exactly like playback on an official web or mobile app — preserving progress, marking items as played, and allowing Suggestarr to do its job.
+The HTTP tracker preserves existing watched flags and does **not** automatically mark items watched. Downloading a file, including its last bytes, does not prove that the viewer watched it. Services such as Suggestarr therefore still need confirmed watched state from a player or a manual action.
 
 ## Installation & Version Pinning (99.99.99)
 
@@ -41,31 +41,54 @@ configuration. Set this override to `Information` to silence the diagnostic
 messages again; the instrumentation can remain installed. Report failures are
 logged at `Error` even when debug logging is disabled.
 
-Search the Jellyfin log for `DLNA trace`. All events include an HTTP `request`
-identifier; tracked streams also include the shared Jellyfin `session` identifier.
-The diagnostics record request ranges, response status/content range, seeks,
-first read, end of stream, disposal, elapsed time, bytes read, cancellation state,
-progress report submission/completion/failure, session now-playing state, and saved
-resume/played values. Full URLs, access tokens, and general request headers are
-not logged. There is no log entry for every data buffer.
+Search the Jellyfin log for `DLNA trace`. Request events include the HTTP trace ID;
+`tracking-candidate` links it to the user/device/item. Session events include the
+Jellyfin session and item IDs. The logs record ranges, first reads, disposal,
+qualification decisions, superseded requests, completed reports, session state,
+and saved resume/played values. Full URLs, tokens, and general request headers
+are not logged. There is no log entry for every data buffer.
 
 To reproduce, use one phone and one video, note the time, play for about a minute,
-seek once, then stop. Note when the browser's playing indicator disappears and
-whether refreshing changes it. Keep the complete interval of `DLNA trace` entries
-and any errors, preferably from the file log with millisecond timestamps.
+seek once, then stop. Check whether the browser's playing indicator appears,
+updates, and clears. Allow roughly 10–11 seconds after stopping for session cleanup.
+Use a video whose watched state was not altered by an earlier test, or record its
+existing state before testing. The tracker never clears an existing watched flag.
 
-Different request IDs with the same session ID and overlapping `stream-open` to
-`dispose` intervals establish concurrent HTTP requests from that session. Compare
-`report-before`/`report-after` and `OnPlaybackStart` snapshots to see whether the
-session item or position changes as another request finishes. Snapshots are
-observations of shared state, not proof that a particular callback caused a change.
-A request ending is not proof that the viewer stopped watching. Byte-derived
-`estimatedTicks` measure downloaded data, not the phone's actual playback clock.
+## Tracking policy and limits
 
-This instrumentation preserves the current reporting behavior, including the
-existing progress report on disposal; it does not restore stop notifications or
-change probe handling. The former “reporting stopped” log label was misleading
-because the current implementation calls `OnPlaybackProgress` there.
+- Playback requires either 8 MiB of contiguous read coverage or at least 1 MiB
+  observed over two seconds. Adjacent short requests can accumulate evidence
+  within a 10-second window; repeated overlapping bytes do not accumulate twice.
+- A read starting in the final 1% (capped at 1 MiB) and transferring less than
+  1 MiB is treated as a potential file-tail probe, not playback evidence.
+- A later request only supersedes an earlier request once it qualifies. All
+  reports for a user/device are awaited in order, including item changes.
+- Qualified sessions update about every five seconds. Inferred positions cannot
+  outrun downloaded coverage or accrue playback time while that buffer is empty.
+- Closing the current request freezes the estimate and starts a 10-second
+  reconnect grace period. An open request with no observed reads for 60 seconds
+  expires. These are explicit heuristics: a buffered or paused phone can still be
+  watching after requests stop, and HTTP alone cannot distinguish those cases.
+- Cleanup uses `ReportSessionEnded` for the synthetic session, not a fabricated
+  `OnPlaybackStopped` completion event. Resume saves respect Jellyfin's minimum
+  resume thresholds and preserve watched status. They do not invoke its automatic
+  completion rules. Jellyfin's separate automatic progress timer is disabled for
+  these sessions so it cannot race with the coordinator.
+- This tracking applies to static video streams with stable seekable byte offsets
+  and known duration/length. Transcoded, live, unknown-length, and audio streams
+  are not estimated by this HTTP tracker. Their media delivery is unchanged.
+- Device identity comes from the request's device ID, falling back to remote IP.
+  Multiple devices behind the same proxy/IP without distinct IDs cannot be
+  reliably distinguished. Seeks within buffered coverage can also be ambiguous.
+
+Run the deterministic regression tests with:
+
+```sh
+dotnet test tests/Jellyfin.Plugin.Dlna.Playback.Tests -c Release
+```
+
+See [the investigation](docs/playback-investigation.md) for the captured failure
+and historical comparison. Debug logging can remain in the code permanently.
 
 ---
 

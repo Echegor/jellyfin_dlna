@@ -40,8 +40,7 @@ public class DlnaVideosController : ControllerBase
     private readonly ITranscodeManager _transcodingJobHelper;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly EncodingHelper _encodingHelper;
-    private readonly MediaBrowser.Controller.Session.ISessionManager _sessionManager;
-    private readonly IUserDataManager _userDataManager;
+    private readonly PlaybackTrackingService _playbackTracking;
     private readonly Microsoft.Extensions.Logging.ILogger<DlnaVideosController> _logger;
 
     private readonly TranscodingJobType _transcodingJobType = TranscodingJobType.Progressive;
@@ -59,8 +58,7 @@ public class DlnaVideosController : ControllerBase
     /// <param name="transcodingJobHelper">Instance of the <see cref="ITranscodeManager"/> class.</param>
     /// <param name="httpClientFactory">Instance of the <see cref="IHttpClientFactory"/> interface.</param>
     /// <param name="encodingHelper">Instance of <see cref="EncodingHelper"/>.</param>
-    /// <param name="sessionManager">Instance of <see cref="MediaBrowser.Controller.Session.ISessionManager"/>.</param>
-    /// <param name="userDataManager">Instance of <see cref="IUserDataManager"/>.</param>
+    /// <param name="playbackTracking">The shared inferred playback tracker.</param>
     /// <param name="logger">Instance of <see cref="Microsoft.Extensions.Logging.ILogger"/>.</param>
     public DlnaVideosController(
         ILibraryManager libraryManager,
@@ -73,8 +71,7 @@ public class DlnaVideosController : ControllerBase
         ITranscodeManager transcodingJobHelper,
         IHttpClientFactory httpClientFactory,
         EncodingHelper encodingHelper,
-        MediaBrowser.Controller.Session.ISessionManager sessionManager,
-        IUserDataManager userDataManager,
+        PlaybackTrackingService playbackTracking,
         Microsoft.Extensions.Logging.ILogger<DlnaVideosController> logger)
     {
         _libraryManager = libraryManager;
@@ -87,8 +84,7 @@ public class DlnaVideosController : ControllerBase
         _transcodingJobHelper = transcodingJobHelper;
         _httpClientFactory = httpClientFactory;
         _encodingHelper = encodingHelper;
-        _sessionManager = sessionManager;
-        _userDataManager = userDataManager;
+        _playbackTracking = playbackTracking;
         _logger = logger;
     }
 
@@ -550,41 +546,28 @@ public class DlnaVideosController : ControllerBase
             return result;
         }
 
-        string client = "DLNA";
-        string deviceName = "DLNA Client";
-        string deviceId = state.Request.DeviceId ?? "DLNA-" + Request.HttpContext.Connection.RemoteIpAddress;
-
-        var sessionInfo = await _sessionManager.LogSessionActivity(client, "1.0.0", deviceId, deviceName, Request.HttpContext.Connection.RemoteIpAddress?.ToString(), user).ConfigureAwait(false);
-
-        string sessionId = sessionInfo?.Id ?? string.Empty;
-        if (string.IsNullOrEmpty(sessionId))
+        // Byte positions are meaningful only for direct, stable files. Transcoded
+        // output and unknown lengths need player feedback, not source-file ratios.
+        if (!state.Request.Static || state.MediaSource.Size is not > 0 || item.RunTimeTicks is not > 0)
         {
-            sessionId = Request.Query["PlaySessionId"].ToString();
-            if (string.IsNullOrEmpty(sessionId))
-            {
-                sessionId = Guid.NewGuid().ToString("N");
-            }
+            _logger.LogDebug("DLNA trace request={RequestId} tracking-skipped reason=unreliable-byte-position", requestId);
+            return result;
         }
 
-        _logger.LogDebug("DLNA trace request={RequestId} session={SessionId} action=OnPlaybackStart before nowPlaying={NowPlaying} ticks={Ticks}", requestId, sessionId, sessionInfo?.NowPlayingItem?.Id, sessionInfo?.PlayState?.PositionTicks);
-        await _sessionManager.OnPlaybackStart(new PlaybackStartInfo
-        {
-            ItemId = itemId,
-            SessionId = sessionId,
-            PositionTicks = state.Request.StartTimeTicks ?? 0,
-            IsPaused = false,
-            PlayMethod = state.Request.Static ? MediaBrowser.Model.Session.PlayMethod.DirectStream : MediaBrowser.Model.Session.PlayMethod.Transcode,
-            MediaSourceId = state.MediaSource.Id
-        }).ConfigureAwait(false);
+        var deviceId = string.IsNullOrWhiteSpace(state.Request.DeviceId)
+            ? "DLNA-" + HttpContext.Connection.RemoteIpAddress
+            : state.Request.DeviceId;
+        var identity = new PlaybackIdentity(user.Id, deviceId, item.Id, state.MediaSource.Id, HttpContext.Connection.RemoteIpAddress?.ToString(), item.RunTimeTicks.Value, state.MediaSource.Size.Value);
 
-        _logger.LogDebug("DLNA trace request={RequestId} session={SessionId} action=OnPlaybackStart completed nowPlaying={NowPlaying} ticks={Ticks}", requestId, sessionId, sessionInfo?.NowPlayingItem?.Id, sessionInfo?.PlayState?.PositionTicks);
-        long totalLength = state.MediaSource.Size ?? 0;
-
-        _logger.LogInformation("DLNA Stream started. Item: {ItemId}, SessionId: {SessionId}, Length: {TotalLength}", itemId, sessionId, totalLength);
+        _logger.LogDebug("DLNA trace request={RequestId} device={DeviceId} user={UserId} item={ItemId} action=tracking-candidate", requestId, deviceId, user.Id, item.Id);
 
         if (result is FileStreamResult fsr)
         {
-            fsr.FileStream = new ProgressTrackingStream(fsr.FileStream, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger, requestId, HttpContext.RequestAborted);
+            if (fsr.FileStream.CanSeek)
+            {
+                fsr.FileStream = new ProgressTrackingStream(fsr.FileStream, _playbackTracking.Tracker, identity, requestId, _logger, HttpContext.RequestAborted);
+            }
+
             return fsr;
         }
 
@@ -597,7 +580,7 @@ public class DlnaVideosController : ControllerBase
             var fs = new System.IO.FileStream(pfr.FileName, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
             try
             {
-                var trackingStream = new ProgressTrackingStream(fs, _sessionManager, _userDataManager, sessionId, item, user, totalLength, _logger, requestId, HttpContext.RequestAborted);
+                var trackingStream = new ProgressTrackingStream(fs, _playbackTracking.Tracker, identity with { Length = fs.Length }, requestId, _logger, HttpContext.RequestAborted);
                 return new FileStreamResult(trackingStream, pfr.ContentType)
                 {
                     EnableRangeProcessing = pfr.EnableRangeProcessing,

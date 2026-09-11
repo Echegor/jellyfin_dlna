@@ -1,5 +1,8 @@
 <Solution>
   <Project Path="src/Jellyfin.Plugin.Dlna/Jellyfin.Plugin.Dlna.csproj" />
+  <Folder Name="/tests/">
+    <Project Path="tests/Jellyfin.Plugin.Dlna.Playback.Tests/Jellyfin.Plugin.Dlna.Playback.Tests.csproj" />
+  </Folder>
   <Project Path="src/Jellyfin.Plugin.Dlna.Model/Jellyfin.Plugin.Dlna.Model.csproj" />
   <Project Path="src/Jellyfin.Plugin.Dlna.Playback/Jellyfin.Plugin.Dlna.Playback.csproj" />
   <Project Path="src/Rssdp/Rssdp.csproj" />
