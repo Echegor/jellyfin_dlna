@@ -24,7 +24,7 @@ public class ProgressTrackingStream : Stream
     private readonly User _user;
     private readonly long _totalLength;
     private readonly long _durationTicks;
-    private readonly Microsoft.Extensions.Logging.ILogger _logger;
+    private readonly ILogger _logger;
 
     private long _bytesRead;
     private long _lastReportedTicks;
@@ -41,7 +41,7 @@ public class ProgressTrackingStream : Stream
         BaseItem item,
         User user,
         long totalLength,
-        Microsoft.Extensions.Logging.ILogger logger)
+        ILogger logger)
     {
         _innerStream = innerStream;
         _sessionManager = sessionManager;
@@ -140,12 +140,12 @@ public class ProgressTrackingStream : Stream
 
         if (fallback && _totalLength > 0)
         {
-            _bytesRead += bytesRead;
-            currentPositionTicks = (long)((double)_bytesRead / _totalLength * _durationTicks);
+            Interlocked.Add(ref _bytesRead, bytesRead);
+            currentPositionTicks = (long)((double)Interlocked.Read(ref _bytesRead) / _totalLength * _durationTicks);
         }
         else if (fallback)
         {
-            _bytesRead += bytesRead;
+            Interlocked.Add(ref _bytesRead, bytesRead);
         }
 
         // Ignore progress updates if the stream has been open for less than 3 seconds (likely a metadata probe)
@@ -156,7 +156,7 @@ public class ProgressTrackingStream : Stream
 
         if (currentPositionTicks > 0)
         {
-            _currentPositionTicks = currentPositionTicks;
+            Interlocked.Exchange(ref _currentPositionTicks, currentPositionTicks);
         }
 
         if (currentPositionTicks <= 0)
@@ -164,17 +164,30 @@ public class ProgressTrackingStream : Stream
             return;
         }
 
-        // Report progress every 10 seconds (10,000,000 ticks) or if sought backward
+        // Report progress every 10 seconds (100,000,000 ticks) or if sought backward
         if (Math.Abs(currentPositionTicks - _lastReportedTicks) > 100000000)
         {
-            _logger.LogInformation("DLNA ProgressTrackingStream reporting progress {Ticks} for {SessionId}", currentPositionTicks, _sessionId);
+            _logger.LogDebug("DLNA ProgressTrackingStream reporting progress {Ticks} for {SessionId}", currentPositionTicks, _sessionId);
             _lastReportedTicks = currentPositionTicks;
-            _sessionManager.OnPlaybackProgress(new PlaybackProgressInfo
+            
+            var progressInfo = new PlaybackProgressInfo
             {
                 ItemId = _item.Id,
                 PositionTicks = currentPositionTicks,
                 SessionId = _sessionId,
                 IsPaused = false
+            };
+            
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _sessionManager.OnPlaybackProgress(progressInfo).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Progress report failed for DLNA session {SessionId}", _sessionId);
+                }
             });
         }
     }
@@ -204,9 +217,9 @@ public class ProgressTrackingStream : Stream
                         var userData = _userDataManager.GetUserData(_user, _item);
                         if (userData != null)
                         {
-                        _userDataManager.UpdatePlayState(_item, userData, _currentPositionTicks);
-                        _userDataManager.SaveUserData(_user, _item, userData, MediaBrowser.Model.Entities.UserDataSaveReason.PlaybackProgress, CancellationToken.None);
-                        _logger.LogInformation("DLNA ProgressTrackingStream manually saved UserData for {Username} at {Ticks}", _user.Username, _currentPositionTicks);
+                            _userDataManager.UpdatePlayState(_item, userData, _currentPositionTicks);
+                            _userDataManager.SaveUserData(_user, _item, userData, MediaBrowser.Model.Entities.UserDataSaveReason.PlaybackProgress, CancellationToken.None);
+                            _logger.LogInformation("DLNA ProgressTrackingStream manually saved UserData for {Username} at {Ticks}", _user.Username, _currentPositionTicks);
                         }
                     }
 
@@ -246,9 +259,9 @@ public class ProgressTrackingStream : Stream
                         var userData = _userDataManager.GetUserData(_user, _item);
                         if (userData != null)
                         {
-                        _userDataManager.UpdatePlayState(_item, userData, _currentPositionTicks);
-                        _userDataManager.SaveUserData(_user, _item, userData, MediaBrowser.Model.Entities.UserDataSaveReason.PlaybackProgress, CancellationToken.None);
-                        _logger.LogInformation("DLNA ProgressTrackingStream manually saved UserData for {Username} at {Ticks}", _user.Username, _currentPositionTicks);
+                            _userDataManager.UpdatePlayState(_item, userData, _currentPositionTicks);
+                            _userDataManager.SaveUserData(_user, _item, userData, MediaBrowser.Model.Entities.UserDataSaveReason.PlaybackProgress, CancellationToken.None);
+                            _logger.LogInformation("DLNA ProgressTrackingStream manually saved UserData for {Username} at {Ticks}", _user.Username, _currentPositionTicks);
                         }
                     }
 
