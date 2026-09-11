@@ -170,25 +170,15 @@ public class ProgressTrackingStream : Stream
             _logger.LogDebug("DLNA ProgressTrackingStream reporting progress {Ticks} for {SessionId}", currentPositionTicks, _sessionId);
             _lastReportedTicks = currentPositionTicks;
             
-            var progressInfo = new PlaybackProgressInfo
+            #pragma warning disable CS4014 // Fire and forget is intentional
+            _sessionManager.OnPlaybackProgress(new PlaybackProgressInfo
             {
                 ItemId = _item.Id,
                 PositionTicks = currentPositionTicks,
                 SessionId = _sessionId,
                 IsPaused = false
-            };
-            
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _sessionManager.OnPlaybackProgress(progressInfo).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Progress report failed for DLNA session {SessionId}", _sessionId);
-                }
             });
+            #pragma warning restore CS4014
         }
     }
 
