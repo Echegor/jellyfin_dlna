@@ -55,9 +55,9 @@ public sealed class PlaybackTracker
         var key = (request.Identity.UserId, request.Identity.DeviceId);
         while (true)
         {
-            if (Volatile.Read(ref _shutdown) != 0 || request.IsRetired?.Invoke() == true)
+            if (Volatile.Read(ref _shutdown) != 0 || request.IsSuperseded?.Invoke() == true)
             {
-                _diagnostic(request.Id, "ignored: expired-request");
+                _diagnostic(request.Id, "ignored: superseded-or-shutdown");
                 return;
             }
 
@@ -76,7 +76,7 @@ public sealed class PlaybackTracker
                     return;
                 }
 
-                request.IsRetired ??= () => state.Retired;
+                request.IsSuperseded = () => state.Owner > request.Sequence;
                 var now = _clock.GetTimestamp();
                 var identity = request.Identity;
                 if (identity.Length <= 0 || identity.DurationTicks <= 0 || bytesRead <= 0)
@@ -127,17 +127,20 @@ public sealed class PlaybackTracker
                 }
 
                 var previousOwner = state.Owner;
+                var starting = state.Identity is null;
                 if (state.Identity is not null)
                 {
                     // Do not accumulate elapsed playback while the inferred buffer
-                    // is empty, or while the owner is closed awaiting reconnect.
+                    // is empty; a reconnect can credit the buffered gap.
                     state.AnchorTicks = Position(state, now);
                     state.AnchorAt = now;
                 }
 
                 if (state.Identity is null)
                 {
-                    var start = ToTicks(firstByte, identity);
+                    var start = state.Owner == request.Sequence && state.ResumeTicks.HasValue
+                        ? state.ResumeTicks.Value : ToTicks(firstByte, identity);
+                    state.ResumeTicks = null;
                     await _reporter.StartAsync(identity, start).ConfigureAwait(false);
                     state.Identity = identity;
                     state.AnchorTicks = start;
@@ -163,7 +166,7 @@ public sealed class PlaybackTracker
                 state.LastRead = now;
                 state.To = Math.Max(state.To, endByte);
                 state.DownloadTicks = ToTicks(state.To, identity);
-                if (previousOwner != request.Sequence || _clock.GetElapsedTime(state.LastReport, now) >= ReportInterval)
+                if (starting || _clock.GetElapsedTime(state.LastReport, now) >= ReportInterval)
                 {
                     await _reporter.ProgressAsync(identity, Position(state, now)).ConfigureAwait(false);
                     state.LastReport = now;
@@ -244,7 +247,17 @@ public sealed class PlaybackTracker
                 {
                     if (state.Identity is not null)
                     {
-                        await _reporter.StopAsync(state.Identity, Position(state, now)).ConfigureAwait(false);
+                        var finalPosition = state.OwnerClosed ? state.AnchorTicks : Position(state, now);
+                        await _reporter.StopAsync(state.Identity, finalPosition).ConfigureAwait(false);
+                        state.ResumeTicks = finalPosition;
+                        state.Identity = null;
+                    }
+
+                    // A timed-out but open owner can resume reading later. Keep its
+                    // generation watermark so superseded requests stay rejected.
+                    if (!shutdown && state.Owner != 0 && !state.OwnerClosed)
+                    {
+                        continue;
                     }
 
                     state.Retired = true;
@@ -276,7 +289,14 @@ public sealed class PlaybackTracker
 
     private long Position(DeviceState state, long now)
     {
-        var elapsed = state.OwnerClosed ? 0 : _clock.GetElapsedTime(state.AnchorAt, now).Ticks;
+        var elapsed = _clock.GetElapsedTime(state.AnchorAt, now).Ticks;
+        if (state.OwnerClosed)
+        {
+            // Buffered playback can continue between short HTTP requests. Credit
+            // the gap only within the reconnect window, bounded by downloaded data.
+            elapsed = Math.Min(elapsed, ReconnectWindow.Ticks);
+        }
+
         return Math.Min(state.DownloadTicks, state.AnchorTicks + elapsed);
     }
 
@@ -295,6 +315,8 @@ public sealed class PlaybackTracker
         }
 
         public long Owner { get; set; }
+
+        public long? ResumeTicks { get; set; }
 
         public bool OwnerClosed { get; set; }
 

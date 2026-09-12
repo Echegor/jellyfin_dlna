@@ -112,7 +112,7 @@ public class ContentDirectoryService : BaseService, IContentDirectory
                 null,
                 _imageProcessor,
                 _userDataManager,
-                null, // User is evaluated in ControlHandler now
+                ResolveUser(profile.UserId, DlnaPlugin.Instance.Configuration.DefaultUserId, _userManager),
                 SystemUpdateId,
                 _localization,
                 _mediaSourceManager,
@@ -123,4 +123,31 @@ public class ContentDirectoryService : BaseService, IContentDirectory
             .ProcessControlRequestAsync(request);
     }
 
+    /// <summary>Resolves an explicitly configured user, or leaves browsing in picker mode.</summary>
+    /// <param name="profileUserId">Optional device profile override.</param>
+    /// <param name="defaultUserId">Optional plugin default.</param>
+    /// <param name="userManager">The user directory.</param>
+    /// <returns>The configured user, or null for the user picker.</returns>
+    public static User? ResolveUser(string? profileUserId, Guid? defaultUserId, IUserManager userManager)
+    {
+        Guid userId;
+        if (!string.IsNullOrWhiteSpace(profileUserId))
+        {
+            if (!Guid.TryParse(profileUserId, out userId))
+            {
+                throw new InvalidOperationException("The DLNA profile's configured user ID is invalid.");
+            }
+        }
+        else if (defaultUserId.HasValue && defaultUserId.Value != Guid.Empty)
+        {
+            userId = defaultUserId.Value;
+        }
+        else
+        {
+            return null;
+        }
+
+        return userManager.GetUserById(userId)
+            ?? throw new InvalidOperationException("The configured DLNA user no longer exists. Update the device profile or default user setting.");
+    }
 }

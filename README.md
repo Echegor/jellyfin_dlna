@@ -54,6 +54,10 @@ updates, and clears. Allow roughly 10–11 seconds after stopping for session cl
 Use a video whose watched state was not altered by an earlier test, or record its
 existing state before testing. The tracker never clears an existing watched flag.
 
+An explicit device-profile user takes precedence over the plugin default user.
+With neither configured, the root shows the paginated user picker. Invalid or
+deleted configured users require correcting the setting before browsing.
+
 ## Tracking policy and limits
 
 - Playback requires either 8 MiB of contiguous read coverage or at least 1 MiB
@@ -62,12 +66,17 @@ existing state before testing. The tracker never clears an existing watched flag
 - A read starting in the final 1% (capped at 1 MiB) and transferring less than
   1 MiB is treated as a potential file-tail probe, not playback evidence.
 - A later request only supersedes an earlier request once it qualifies. All
-  reports for a user/device are awaited in order, including item changes.
-- Qualified sessions update about every five seconds. Inferred positions cannot
+  backend callbacks for a user/device run in order on a separate worker, including
+  item changes. Slow callbacks cannot block media reads or another device. Each
+  device keeps only its latest pending report; failures retry on maintenance.
+- Qualified sessions update about every five seconds, including when short range
+  requests replace one another. Inferred positions cannot
   outrun downloaded coverage or accrue playback time while that buffer is empty.
-- Closing the current request freezes the estimate and starts a 10-second
-  reconnect grace period. An open request with no observed reads for 60 seconds
-  expires. These are explicit heuristics: a buffered or paused phone can still be
+- Closing the current request starts a 10-second reconnect grace period. A
+  continuation credits the gap, bounded by downloaded coverage; if no continuation
+  arrives, cleanup saves the position at close. An open request with no observed
+  reads for 60 seconds ends the session, but can start a new session if it resumes
+  reading. These are explicit heuristics: a buffered or paused phone can still be
   watching after requests stop, and HTTP alone cannot distinguish those cases.
 - Cleanup uses `ReportSessionEnded` for the synthetic session, not a fabricated
   `OnPlaybackStopped` completion event. Resume saves respect Jellyfin's minimum

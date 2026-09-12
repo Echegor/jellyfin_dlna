@@ -33,6 +33,8 @@ public class PlaybackTrackerTests
         clock.Advance(3);
         var seek = tracker.Open(Movie, "seek");
         await tracker.ObserveAsync(seek, 1398616445, 1398616445 + 10 * Mb, 10 * Mb);
+        clock.Advance(2);
+        await tracker.SweepAsync();
         var position = reporter.Events.Last().Ticks;
         Assert.True(position > TimeSpan.FromMinutes(29).Ticks);
         var count = reporter.Events.Count;
@@ -88,7 +90,7 @@ public class PlaybackTrackerTests
         var next = tracker.Open(Movie, "next");
         await tracker.ObserveAsync(next, 10 * Mb, 20 * Mb, 10 * Mb);
         Assert.Single(reporter.Events, e => e.Kind == "start");
-        Assert.Equal(0, reporter.Events.Last().Ticks);
+        Assert.Equal(TimeSpan.FromSeconds(9).Ticks, reporter.Events.Last().Ticks);
         await tracker.CloseAsync(next);
         clock.Advance(11);
         await tracker.SweepAsync();
@@ -135,11 +137,12 @@ public class PlaybackTrackerTests
     [Fact]
     public async Task DelayedCallbackSerializesLaterSeekAndFailureDoesNotDeadlock()
     {
-        var (tracker, reporter, _) = Create();
+        var (tracker, reporter, clock) = Create();
         var blocked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         reporter.BlockProgress = blocked.Task;
         var old = tracker.Open(Movie, "old");
         var first = tracker.ObserveAsync(old, 0, 10 * Mb, 10 * Mb);
+        clock.Advance(5);
         var second = tracker.ObserveAsync(tracker.Open(Movie, "seek"), 1000 * Mb, 1010 * Mb, 10 * Mb);
         Assert.False(second.IsCompleted);
         reporter.BlockProgress = null;
@@ -174,7 +177,7 @@ public class PlaybackTrackerTests
     }
 
     [Fact]
-    public async Task ExpiredRequestCannotResurrectSession()
+    public async Task IdleOwnerResumesButSupersededRequestCannotResurrectSession()
     {
         var (tracker, reporter, clock) = Create();
         var old = tracker.Open(Movie, "old");
@@ -183,9 +186,14 @@ public class PlaybackTrackerTests
         await tracker.SweepAsync();
         var count = reporter.Events.Count;
         await tracker.ObserveAsync(old, 0, 20 * Mb, 20 * Mb);
-        Assert.Equal(count, reporter.Events.Count);
-        await tracker.ObserveAsync(tracker.Open(Movie, "fresh"), 0, 10 * Mb, 10 * Mb);
+        Assert.Equal(count + 2, reporter.Events.Count);
         Assert.Equal(2, reporter.Events.Count(e => e.Kind == "start"));
+        await tracker.ObserveAsync(tracker.Open(Movie, "fresh"), 0, 10 * Mb, 10 * Mb);
+        clock.Advance(61);
+        await tracker.SweepAsync();
+        count = reporter.Events.Count;
+        await tracker.ObserveAsync(old, 0, 30 * Mb, 30 * Mb);
+        Assert.Equal(count, reporter.Events.Count);
     }
 
     [Fact]
@@ -248,6 +256,37 @@ public class PlaybackTrackerTests
         await tracker.ObserveAsync(request, 0, 100 * Mb, 100 * Mb);
         var tenMbTicks = (long)((double)(10 * Mb) / Movie.Length * Movie.DurationTicks);
         Assert.Equal(tenMbTicks, reporter.Events.Last().Ticks);
+    }
+
+    [Fact]
+    public async Task ProgressAdvancesAcrossGapsBetweenShortRequests()
+    {
+        var (tracker, reporter, clock) = Create();
+        for (var i = 0; i < 10; i++)
+        {
+            var request = tracker.Open(Movie, $"range-{i}");
+            await tracker.ObserveAsync(request, i * 10 * Mb, (i + 1) * 10 * Mb, 10 * Mb);
+            await tracker.CloseAsync(request);
+            clock.Advance(8);
+        }
+
+        Assert.Equal(TimeSpan.FromSeconds(72).Ticks, reporter.Events.Last().Ticks);
+        Assert.Single(reporter.Events, e => e.Kind == "start");
+    }
+
+    [Fact]
+    public async Task OneHundredShortRequestsDoNotBypassReportInterval()
+    {
+        var (tracker, reporter, clock) = Create();
+        for (var i = 0; i < 100; i++)
+        {
+            var request = tracker.Open(Movie, $"range-{i}");
+            await tracker.ObserveAsync(request, i * Mb, (i + 1) * Mb, Mb);
+            await tracker.CloseAsync(request);
+            clock.Advance(.01);
+        }
+
+        Assert.Single(reporter.Events, e => e.Kind == "progress");
     }
 
     private static (PlaybackTracker Tracker, Reporter Reporter, Clock Clock) Create()

@@ -18,7 +18,7 @@ public sealed class PlaybackRequest
 
     internal long Sequence { get; }
 
-    internal Func<bool>? IsRetired { get; set; }
+    internal Func<bool>? IsSuperseded { get; set; }
 
     internal bool Closed { get; set; }
 }

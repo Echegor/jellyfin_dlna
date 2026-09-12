@@ -6,31 +6,39 @@ const DlnaConfigurationPage = {
         ApiClient.getPluginConfiguration(this.pluginUniqueId)
             .then(function(config) {
                 page.querySelector('#dlnaPlayTo').checked = config.EnablePlayTo;
-                page.querySelector('#dlnaDiscoveryInterval').value = parseInt(config.ClientDiscoveryIntervalSeconds) || this.defaultDiscoveryInterval;
+                page.querySelector('#dlnaDiscoveryInterval').value = parseInt(config.ClientDiscoveryIntervalSeconds) || DlnaConfigurationPage.defaultDiscoveryInterval;
                 page.querySelector('#dlnaBlastAlive').checked = config.BlastAliveMessages;
-                page.querySelector('#dlnaAliveInterval').value = parseInt(config.AliveMessageIntervalSeconds) || this.defaultAliveInterval;
+                page.querySelector('#dlnaAliveInterval').value = parseInt(config.AliveMessageIntervalSeconds) || DlnaConfigurationPage.defaultAliveInterval;
                 page.querySelector('#dlnaMatchedHost').checked = config.SendOnlyMatchedHost;
 
-                Dashboard.hideLoadingMsg();
-            });
+                return ApiClient.getUsers().then(function(users) {
+                    const select = page.querySelector('#dlnaSelectUser');
+                    select.replaceChildren(new Option('Show user picker', ''));
+                    users.forEach(user => select.add(new Option(user.Name, user.Id)));
+                    const configured = config.DefaultUserId || '';
+                    const matching = Array.from(select.options).find(option =>
+                        option.value.replaceAll('-', '').toLowerCase() === configured.replaceAll('-', '').toLowerCase());
+                    if (configured && !matching) {
+                        select.add(new Option('Configured user (unavailable)', configured));
+                    }
+                    select.value = matching ? matching.value : configured;
+                });
+            }).finally(() => Dashboard.hideLoadingMsg());
     },
 
     save: function(page) {
         Dashboard.showLoadingMsg();
-        return new Promise((_) => {
-            ApiClient.getPluginConfiguration(this.pluginUniqueId)
-                .then(function(config) {
-                    config.EnablePlayTo = page.querySelector('#dlnaPlayTo').checked;
-                    config.ClientDiscoveryIntervalSeconds = parseInt(page.querySelector('#dlnaDiscoveryInterval').value) || this.defaultDiscoveryInterval;
-                    config.BlastAliveMessages = page.querySelector('#dlnaBlastAlive').checked;
-                    config.AliveMessageIntervalSeconds = parseInt(page.querySelector('#dlnaAliveInterval').value) || this.defaultAliveInterval;
-                    config.SendOnlyMatchedHost = page.querySelector('#dlnaMatchedHost').checked;
-                    
-
-
-                    ApiClient.updatePluginConfiguration(DlnaConfigurationPage.pluginUniqueId, config).then(Dashboard.processPluginConfigurationUpdateResult);
-                });
-        })
+        return ApiClient.getPluginConfiguration(this.pluginUniqueId)
+            .then(function(config) {
+                config.EnablePlayTo = page.querySelector('#dlnaPlayTo').checked;
+                config.ClientDiscoveryIntervalSeconds = parseInt(page.querySelector('#dlnaDiscoveryInterval').value) || DlnaConfigurationPage.defaultDiscoveryInterval;
+                config.BlastAliveMessages = page.querySelector('#dlnaBlastAlive').checked;
+                config.AliveMessageIntervalSeconds = parseInt(page.querySelector('#dlnaAliveInterval').value) || DlnaConfigurationPage.defaultAliveInterval;
+                config.SendOnlyMatchedHost = page.querySelector('#dlnaMatchedHost').checked;
+                config.DefaultUserId = page.querySelector('#dlnaSelectUser').value || null;
+                return ApiClient.updatePluginConfiguration(DlnaConfigurationPage.pluginUniqueId, config);
+            }).then(Dashboard.processPluginConfigurationUpdateResult)
+            .finally(() => Dashboard.hideLoadingMsg());
     }
 }
 

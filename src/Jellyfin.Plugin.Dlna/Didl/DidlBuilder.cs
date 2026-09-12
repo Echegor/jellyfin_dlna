@@ -789,7 +789,7 @@ public class DidlBuilder
 
         writer.WriteAttributeString("restricted", "1");
         writer.WriteAttributeString("searchable", "1");
-        writer.WriteAttributeString("childCount", "0");
+        // Omit an unknown child count; zero would advertise this user folder as empty.
         writer.WriteAttributeString("id", id);
         writer.WriteAttributeString("parentID", "0");
 

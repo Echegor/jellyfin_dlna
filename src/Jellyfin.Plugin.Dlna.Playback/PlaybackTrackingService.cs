@@ -18,6 +18,7 @@ namespace Jellyfin.Plugin.Dlna.Playback;
 public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReporter
 {
     private readonly IServiceScopeFactory _scopes;
+    private readonly BufferedPlaybackReporter _reports;
     private readonly ILogger<PlaybackTrackingService> _logger;
     private readonly ConcurrentDictionary<(Guid User, string Device), string> _sessions = new();
 
@@ -28,7 +29,8 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
     {
         _scopes = scopes;
         _logger = logger;
-        Tracker = new PlaybackTracker(this, TimeProvider.System, (request, decision) => logger.LogDebug("DLNA trace request={RequestId} decision={Decision}", request, decision));
+        _reports = new BufferedPlaybackReporter(this, ex => logger.LogError(ex, "DLNA trace action=buffered-report-failed; will retry"));
+        Tracker = new PlaybackTracker(_reports, TimeProvider.System, (request, decision) => logger.LogDebug("DLNA trace request={RequestId} decision={Decision}", request, decision));
     }
 
     /// <summary>Gets the coordinator shared by video requests.</summary>
@@ -124,6 +126,7 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
                 try
                 {
                     await Tracker.SweepAsync().ConfigureAwait(false);
+                    _reports.RetryPending();
                 }
                 catch (Exception ex)
                 {
@@ -140,6 +143,8 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
             try
             {
                 await Tracker.SweepAsync(shutdown: true).ConfigureAwait(false);
+                using var drainTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await _reports.DrainAsync(drainTimeout.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

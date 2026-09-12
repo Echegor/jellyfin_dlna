@@ -50,3 +50,34 @@ Additional tests cover adjacent ranges, backward seeks, reconnect grace, idle
 expiry, late callbacks after expiry, multiple devices/users, item changes, shutdown,
 maintenance failure isolation/retry, empty responses, and downloaded data ahead of
 the playback clock. Live verification still requires a new phone/browser test.
+
+## Follow-up review fixes — 2026-09-12
+
+The diff review against 0eec286 identified six regressions or performance problems,
+plus loss of explicitly configured user selection. All have been addressed:
+
+- Short request gaps now contribute buffered elapsed time when a continuation
+  arrives during reconnect grace. Ten 10 MiB requests eight seconds apart advance
+  the last reported estimate to 72 seconds instead of freezing at zero.
+- An idle open request can resume tracking after the 60-second session timeout.
+  Its owner watermark remains until close, so older superseded requests stay
+  rejected. Shutdown still prevents all resurrection.
+- Ownership changes obey the five-second report interval. A burst of 100 adjacent
+  1 MiB requests now produces one progress report, instead of 93. A seek can take
+  up to five seconds to appear in Jellyfin.
+- Backend callbacks run on one asynchronous worker per device, with one latest
+  pending state. A blocked callback cannot stall HTTP reads or another device;
+  pending progress coalesces and failed callbacks retry during maintenance.
+  Cleanup for the actual reported session remains ordered with subsequent starts.
+- Virtual user containers omit unknown childCount instead of declaring zero.
+- Root user listings apply StartingIndex and RequestedCount, with stable ordering
+  and separate total and returned counts.
+- Device profile UserId again overrides DefaultUserId. With neither configured,
+  the user picker remains available. Invalid/deleted configured users fail closed;
+  prefixed object IDs cannot switch a fixed-user device to another user.
+
+Validation: 30 regression tests, four historical assertions, a Release solution
+build with zero warnings/errors, and JavaScript syntax validation pass. The
+blocked-callback test also coalesces 10,000 pending updates and verifies another
+user/device remains responsive. These deterministic tests do not replace the
+remaining live phone/browser check.
