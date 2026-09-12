@@ -3,16 +3,26 @@
 > **⚠️ CUSTOM FORK**: This is a specialized fork of the official Jellyfin DLNA plugin pinned to **Jellyfin 12.0**.
 
 ## Why this exists
-When a device browses Jellyfin and pulls a video over DLNA, its HTTP requests do not provide the playback feedback available from a Jellyfin client. This fork adds user selection and conservative estimated resume tracking for those requests.
+The official Jellyfin DLNA implementation lacks user context (since DLNA clients don't log in) and provides unreliable playback progress tracking because standard DLNA players do not report their playback status back to the server. This breaks core functionality like personalized profiles, "Continue Watching", and syncing with third-party tools like Suggestarr.
 
-## What we changed
+## Core Modifications
+
 To solve this, we completely modified how DLNA serves content:
 
-1. **Virtual User Picker as Root**: We altered the DLNA directory structure so that the absolute root folder is a "User Picker". Before seeing any media, the TV user must select their Jellyfin profile.
-2. **User Context Propagation**: Once a user is selected, their User ID is injected into the DLNA metadata and passed along as a `?userId=` query parameter to all streaming URLs.
-3. **Estimated Progress Tracking**: A shared coordinator tracks qualified file reads per user/device and reports an inferred playback session. Older HTTP requests cannot overwrite a newer qualified seek. Resume positions use elapsed time bounded by downloaded data; they are estimates, particularly with variable bitrate files.
+### 1. Virtual User Picker as Root
+**The Problem:** DLNA devices cannot natively log into Jellyfin profiles.
+**The Solution:** The DLNA directory tree is modified to inject a "User Picker" folder at the absolute root. A user must select their Jellyfin profile before they can browse any media. Alternatively, a "Default DLNA User" can be configured to bypass the picker.
 
-The HTTP tracker preserves existing watched flags and does **not** automatically mark items watched. Downloading a file, including its last bytes, does not prove that the viewer watched it. Services such as Suggestarr therefore still need confirmed watched state from a player or a manual action.
+### 2. User Context Propagation
+Once a user is selected, their User ID is injected into the DLNA metadata and appended as a `?userId=` query parameter to all subsequent streaming URLs, ensuring playback is attributed to the correct user.
+
+### 3. Stateful Progress Tracking
+**The Problem:** The official plugin relies on stateless HTTP requests, which cannot distinguish between a user actually watching a video and a device probing a file for metadata or caching. 
+**The Solution:** A sophisticated coordinator tracks HTTP range requests and downloaded bytes to infer playback progress.
+- **Smart Filtering:** It distinguishes between real playback and metadata probes (e.g., rejecting reads of the final 1% of a file if it transfers less than 1 MiB).
+- **Session Management:** It maintains a playback session, smoothly handling chunked streaming, buffering gaps, and device reconnects without incorrectly marking items as watched. 
+
+Services such as Suggestarr still need confirmed watched state from a player or a manual action, as the HTTP tracker preserves existing watched flags and does **not** automatically mark items watched based solely on downloaded bytes.
 
 ## Installation & Version Pinning (99.99.99)
 
