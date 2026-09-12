@@ -15,6 +15,12 @@
                         <a is="emby-linkbutton" class="raised button-alt headerHelpButton emby-button" target="_blank" href="https://github.com/jellyfin/jellyfin-plugin-dlna">${Help}</a>
                     </div>
                     <div class="verticalSection verticalSection-extrabottompadding">
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="dlnaSelectUser">Default user for DLNA</label>
+                            <select is="emby-select" id="dlnaSelectUser"></select>
+                            <div class="fieldDescription">None shows the user picker via DLNA. Selecting a user opens their library directly and saves movie progress for that user.</div>
+                        </div>
+
                         <div class="checkboxContainer">
                             <label>
                                 <input type="checkbox" is="emby-checkbox" id="dlnaPlayTo" />

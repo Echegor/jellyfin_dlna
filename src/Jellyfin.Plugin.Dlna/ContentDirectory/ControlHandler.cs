@@ -53,6 +53,7 @@ public class ControlHandler : BaseControlHandler
     private readonly ILibraryManager _libraryManager;
     private readonly IUserDataManager _userDataManager;
     private User? _user;
+    private readonly User? _defaultUser;
     private readonly IUserViewManager _userViewManager;
     private readonly ITVSeriesManager _tvSeriesManager;
     private readonly IUserManager _userManager;
@@ -102,6 +103,7 @@ public class ControlHandler : BaseControlHandler
         _libraryManager = libraryManager;
         _userDataManager = userDataManager;
         _user = user;
+        _defaultUser = user;
         _userManager = userManager;
         _systemUpdateId = systemUpdateId;
         _userViewManager = userViewManager;
@@ -356,7 +358,7 @@ public class ControlHandler : BaseControlHandler
 
                 if (IsWrittenAsContainer(serverItem))
                 {
-                    var childCount = DidlBuilder.IsIdRoot(id)
+                    var childCount = _defaultUser is null && DidlBuilder.IsIdRoot(id)
                         ? _userManager.GetUsers().Count()
                         : GetChildCounts([serverItem], null, sortCriteria)[0];
 
@@ -369,7 +371,7 @@ public class ControlHandler : BaseControlHandler
 
                 provided++;
             }
-            else if (id == "0" || DidlBuilder.IsIdRoot(id))
+            else if (_defaultUser is null && (id == "0" || DidlBuilder.IsIdRoot(id)))
             {
                 var users = _userManager.GetUsers().OrderBy(u => u.Username, StringComparer.OrdinalIgnoreCase).ThenBy(u => u.Id).ToList();
                 totalCount = users.Count;
@@ -1687,7 +1689,7 @@ public class ControlHandler : BaseControlHandler
                 var userIdStr = id.Substring(2, nextUnderscore - 2);
                 if (Guid.TryParse(userIdStr, out var userId))
                 {
-                    var user = _userManager.GetUserById(userId);
+                    var user = _defaultUser ?? _userManager.GetUserById(userId);
                     if (user != null)
                     {
                         _user = user;

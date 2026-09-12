@@ -70,6 +70,36 @@ public class BrowseCompatibilityTests
         }
     }
 
+    [Fact]
+    public void DefaultUserSkipsPickerAndOverridesCachedUserFolders()
+    {
+        var selected = NewUser("Selected");
+        var other = NewUser("Other");
+        var manager = new Mock<IUserManager>();
+        manager.Setup(x => x.GetUserById(selected.Id)).Returns(selected);
+        manager.Setup(x => x.GetUserById(other.Id)).Returns(other);
+        var views = new Mock<IUserViewManager>();
+        views.Setup(x => x.GetUserViews(It.IsAny<UserViewQuery>())).Returns(Array.Empty<UserView>());
+        var handler = Handler(manager.Object, selected, views.Object);
+        Browse(handler, "0", 0, 10);
+        Browse(handler, $"u_{other.Id:N}_0", 0, 10);
+        manager.Verify(x => x.GetUsers(), Times.Never);
+        views.Verify(x => x.GetUserViews(It.Is<UserViewQuery>(q => q.User == selected)), Times.Exactly(2));
+        views.Verify(x => x.GetUserViews(It.Is<UserViewQuery>(q => q.User == other)), Times.Never);
+    }
+
+    [Fact]
+    public void DefaultUserResolutionSupportsNoneAndRejectsDeletedUsers()
+    {
+        var selected = NewUser("Selected");
+        var manager = new Mock<IUserManager>();
+        manager.Setup(x => x.GetUserById(selected.Id)).Returns(selected);
+        Assert.Null(ContentDirectoryService.ResolveDefaultUser(null, manager.Object));
+        Assert.Null(ContentDirectoryService.ResolveDefaultUser(Guid.Empty, manager.Object));
+        Assert.Same(selected, ContentDirectoryService.ResolveDefaultUser(selected.Id, manager.Object));
+        Assert.Throws<InvalidOperationException>(() => ContentDirectoryService.ResolveDefaultUser(Guid.NewGuid(), manager.Object));
+    }
+
     private static User NewUser(string name) => new(name, "password", "reset") { Id = Guid.NewGuid() };
 
     private static ControlHandler Handler(IUserManager manager, User? user = null, IUserViewManager? views = null)

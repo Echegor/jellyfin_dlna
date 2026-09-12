@@ -112,7 +112,7 @@ public class ContentDirectoryService : BaseService, IContentDirectory
                 null,
                 _imageProcessor,
                 _userDataManager,
-                null,
+                ResolveDefaultUser(_dlna.DefaultUserId, _userManager),
                 SystemUpdateId,
                 _localization,
                 _mediaSourceManager,
@@ -121,5 +121,15 @@ public class ContentDirectoryService : BaseService, IContentDirectory
                 _tvSeriesManager,
                 _userManager)
             .ProcessControlRequestAsync(request);
+    }
+
+    /// <summary>Resolves the default user without silently falling back to a different user.</summary>
+    /// <param name="id">The configured default user.</param>
+    /// <param name="users">The user directory.</param>
+    /// <returns>The selected user, or null for the picker.</returns>
+    public static User? ResolveDefaultUser(Guid? id, IUserManager users)
+    {
+        return id is null || id == Guid.Empty ? null : users.GetUserById(id.Value)
+            ?? throw new InvalidOperationException("The default DLNA user no longer exists. Select another user or None in DLNA settings.");
     }
 }

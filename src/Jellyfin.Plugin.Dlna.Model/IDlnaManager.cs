@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.AspNetCore.Http;
@@ -9,6 +10,9 @@ namespace Jellyfin.Plugin.Dlna.Model;
 /// </summary>
 public interface IDlnaManager
 {
+    /// <summary>Gets the default DLNA user, or null to show the user picker.</summary>
+    Guid? DefaultUserId { get; }
+
     /// <summary>
     /// Gets the profile infos.
     /// </summary>

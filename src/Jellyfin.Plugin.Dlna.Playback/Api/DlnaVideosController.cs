@@ -202,6 +202,8 @@ public class DlnaVideosController : ControllerBase
         [FromQuery] Guid? userId,
         [FromQuery] Dictionary<string, string> streamOptions)
     {
+        // A configured default also overrides user IDs in cached DLNA URLs.
+        userId = _dlnaManager.DefaultUserId ?? userId;
         var isHeadRequest = Request.Method == System.Net.WebRequestMethods.Http.Head;
         // CTS lifecycle is managed internally.
         var cancellationTokenSource = new CancellationTokenSource();

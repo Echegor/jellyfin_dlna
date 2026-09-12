@@ -91,3 +91,18 @@ profile/default user values no longer bypass the picker. Root metadata counts
 users, and selecting a user retains their identity in child IDs and media URLs.
 The updated 29-test suite replaces the two fixed-user tests with a test selecting
 each of two users and verifying their normal user views and child identity.
+
+## Optional default user — 2026-09-12
+
+The dashboard now explicitly supports both requested modes: None shows the user
+picker; choosing an existing user opens their normal library directly. The
+selected default overrides cached folder IDs and video-request user IDs. Device
+profile users do not override the dashboard choice. Existing streams retain the
+identity assigned when they started; new requests use the current setting.
+Deleted configured users produce a browsing error instead of selecting someone
+else. The UI retains an unavailable selection until the administrator corrects it.
+
+Validation: 31 .NET tests and the JavaScript dropdown test pass. The dropdown test
+covers population, GUID formatting, saving users/None, and deleted-user handling.
+The Pi's previously ignored legacy default is cleared once during deployment to
+preserve its current picker behavior; subsequent choices are saved normally.

@@ -3,13 +3,25 @@ const DlnaConfigurationPage = {
     defaultDiscoveryInterval: 60,
     defaultAliveInterval: 100,
     loadConfiguration: function (page) {
-        ApiClient.getPluginConfiguration(this.pluginUniqueId)
+        return ApiClient.getPluginConfiguration(this.pluginUniqueId)
             .then(function(config) {
                 page.querySelector('#dlnaPlayTo').checked = config.EnablePlayTo;
                 page.querySelector('#dlnaDiscoveryInterval').value = parseInt(config.ClientDiscoveryIntervalSeconds) || DlnaConfigurationPage.defaultDiscoveryInterval;
                 page.querySelector('#dlnaBlastAlive').checked = config.BlastAliveMessages;
                 page.querySelector('#dlnaAliveInterval').value = parseInt(config.AliveMessageIntervalSeconds) || DlnaConfigurationPage.defaultAliveInterval;
                 page.querySelector('#dlnaMatchedHost').checked = config.SendOnlyMatchedHost;
+                return ApiClient.getUsers().then(function(users) {
+                    const select = page.querySelector('#dlnaSelectUser');
+                    select.replaceChildren(new Option('None', ''));
+                    users.forEach(user => select.add(new Option(user.Name, user.Id)));
+                    const configured = config.DefaultUserId || '';
+                    const normalize = value => value.replaceAll('-', '').toLowerCase();
+                    const matching = Array.from(select.options).find(option => normalize(option.value) === normalize(configured));
+                    if (configured && !matching) {
+                        select.add(new Option('Unavailable user — select another user or None', configured));
+                    }
+                    select.value = matching ? matching.value : configured;
+                });
 
             }).finally(() => Dashboard.hideLoadingMsg());
     },
@@ -23,6 +35,7 @@ const DlnaConfigurationPage = {
                 config.BlastAliveMessages = page.querySelector('#dlnaBlastAlive').checked;
                 config.AliveMessageIntervalSeconds = parseInt(page.querySelector('#dlnaAliveInterval').value) || DlnaConfigurationPage.defaultAliveInterval;
                 config.SendOnlyMatchedHost = page.querySelector('#dlnaMatchedHost').checked;
+                config.DefaultUserId = page.querySelector('#dlnaSelectUser').value || null;
                 return ApiClient.updatePluginConfiguration(DlnaConfigurationPage.pluginUniqueId, config);
             }).then(Dashboard.processPluginConfigurationUpdateResult)
             .finally(() => Dashboard.hideLoadingMsg());

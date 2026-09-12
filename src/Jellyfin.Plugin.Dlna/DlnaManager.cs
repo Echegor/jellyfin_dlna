@@ -64,6 +64,9 @@ public class DlnaManager : IDlnaManager
         _appHost = appHost;
     }
 
+    /// <inheritdoc />
+    public Guid? DefaultUserId => DlnaPlugin.Instance.Configuration.DefaultUserId is { } id && id != Guid.Empty ? id : null;
+
     private string UserProfilesPath => Path.Combine(_appPaths.PluginConfigurationsPath, "dlna", "user");
 
     private static string SystemProfilesPath => Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "profiles");

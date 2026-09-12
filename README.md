@@ -54,10 +54,12 @@ updates, and clears. Allow roughly 10–11 seconds after stopping for session cl
 Use a video whose watched state was not altered by an earlier test, or record its
 existing state before testing. The tracker never clears an existing watched flag.
 
-Opening pi5 through DLNA always shows the paginated user picker. Selecting a user
-opens their normal media landing screen; child IDs and media URLs retain that
-user for personalized browsing and playback tracking. Legacy profile/default
-user settings do not bypass selection.
+In Dashboard → DLNA, **Default user for DLNA** offers **None** and every existing
+Jellyfin user. None shows the user picker. Selecting a user opens their normal
+media landing screen directly and attributes new video requests to that user,
+including cached links naming another user. Reopen the DLNA server after changing
+the setting to refresh the listing. Device-profile user settings do not override
+this choice. Resume thresholds and watched-status handling stay the same.
 
 ## Tracking policy and limits
 

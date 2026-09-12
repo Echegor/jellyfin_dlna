@@ -34,4 +34,7 @@ public class DlnaPluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether to send only matched host.
     /// </summary>
     public bool SendOnlyMatchedHost { get; set; } = true;
+
+    /// <summary>Gets or sets the default DLNA user; null shows the user picker.</summary>
+    public Guid? DefaultUserId { get; set; }
 }
