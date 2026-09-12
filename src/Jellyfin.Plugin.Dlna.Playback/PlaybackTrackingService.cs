@@ -18,8 +18,7 @@ namespace Jellyfin.Plugin.Dlna.Playback;
 public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReporter
 {
     // Time-Gate for DLNA completion: how long a session must be active before it can be marked as watched.
-    // Set to 10 seconds for testing (production default should be 3 minutes).
-    private static readonly TimeSpan MinimumSessionDuration = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan MinimumSessionDuration = TimeSpan.FromMinutes(1);
 
     private readonly IServiceScopeFactory _scopes;
     private readonly BufferedPlaybackReporter _reports;

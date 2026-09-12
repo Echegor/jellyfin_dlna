@@ -22,7 +22,7 @@ Once a user is selected, their User ID is injected into the DLNA metadata and ap
 - **Smart Filtering:** It distinguishes between real playback and metadata probes (e.g., rejecting reads of the final 1% of a file if it transfers less than 1 MiB).
 - **Session Management:** It maintains a playback session, smoothly handling chunked streaming, buffering gaps, and device reconnects without incorrectly marking items as watched. 
 
-Services such as Suggestarr still need confirmed watched state from a player or a manual action, as the HTTP tracker preserves existing watched flags and does **not** automatically mark items watched based solely on downloaded bytes.
+- **Time-Gated Completion:** If a user finishes a movie (crosses 90%), the tracker checks a real-time stopwatch. If the session was active for at least 1 minute, it officially marks the movie as "Watched" and broadcasts the completion event to the Jellyfin ecosystem (Web UI, Webhooks, Suggestarr, Trakt). This perfectly filters out background metadata probes while restoring automatic DLNA watched tracking.
 
 ## Installation & Version Pinning (99.99.99)
 
