@@ -69,8 +69,12 @@ public sealed class ProgressTrackingStream : Stream
     public override int Read(byte[] buffer, int offset, int count)
     {
         var read = _inner.Read(buffer, offset, count);
-        // Stream's synchronous contract requires completing the observation here.
-        ObserveAsync(read).GetAwaiter().GetResult();
+        var observeTask = ObserveAsync(read);
+        if (!observeTask.IsCompleted)
+        {
+            observeTask.AsTask().GetAwaiter().GetResult();
+        }
+
         return read;
     }
 
@@ -140,7 +144,7 @@ public sealed class ProgressTrackingStream : Stream
         base.Dispose(disposing);
     }
 
-    private async Task ObserveAsync(int read)
+    private async ValueTask ObserveAsync(int read)
     {
         if (read <= 0)
         {

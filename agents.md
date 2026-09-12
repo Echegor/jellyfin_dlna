@@ -26,3 +26,6 @@ By examining the commits since this library was forked, the purpose of this repo
 
 ## Summary
 This custom library intercepts and analyzes the underlying DLNA HTTP requests to emulate the stateful behaviors (user attribution and progress tracking) of a native Jellyfin client, allowing for personalized profiles and accurate "Continue Watching" tracking over the stateless DLNA protocol.
+
+## Architectural Decisions (ADR)
+For a complete, chronological history of the technical decisions, performance optimizations, and protocol compromises made since this repository was forked, always refer to the markdown files in the `decisions/` directory. These files act as the architectural ledger for the project.
