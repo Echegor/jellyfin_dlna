@@ -5,6 +5,10 @@ using System.Xml.Linq;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.Dlna.ContentDirectory;
 using Jellyfin.Plugin.Dlna.Model;
+using Jellyfin.Plugin.Dlna.Didl;
+using MediaBrowser.Model.Querying;
+using MediaBrowser.Model.Library;
+using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Drawing;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -44,39 +48,37 @@ public class BrowseCompatibilityTests
     }
 
     [Fact]
-    public void ConfiguredUserPrecedenceAndPickerFallbackArePreserved()
+    public void SelectingEachUserOpensTheirNormalLandingAndCarriesIdentityToChildren()
     {
-        var profile = NewUser("Profile");
-        var fallback = NewUser("Default");
+        var users = new[] { NewUser("Alice"), NewUser("Bob") };
         var manager = new Mock<IUserManager>();
-        manager.Setup(x => x.GetUserById(profile.Id)).Returns(profile);
-        manager.Setup(x => x.GetUserById(fallback.Id)).Returns(fallback);
-        Assert.Same(profile, ContentDirectoryService.ResolveUser(profile.Id.ToString(), fallback.Id, manager.Object));
-        Assert.Same(fallback, ContentDirectoryService.ResolveUser(null, fallback.Id, manager.Object));
-        Assert.Null(ContentDirectoryService.ResolveUser(null, null, manager.Object));
-        Assert.Throws<InvalidOperationException>(() => ContentDirectoryService.ResolveUser("invalid", fallback.Id, manager.Object));
-        Assert.Throws<InvalidOperationException>(() => ContentDirectoryService.ResolveUser(Guid.NewGuid().ToString(), fallback.Id, manager.Object));
-    }
-
-    [Fact]
-    public void ConfiguredDeviceCannotSwitchUsersThroughObjectId()
-    {
-        var configured = NewUser("Configured");
-        var manager = new Mock<IUserManager>();
-        var handler = Handler(manager.Object, configured);
-        var error = Assert.Throws<TargetInvocationException>(() => Browse(handler, $"u_{Guid.NewGuid():N}_0", 0, 1));
-        Assert.IsType<InvalidOperationException>(error.InnerException);
+        manager.Setup(x => x.GetUsers()).Returns(users);
+        var views = new Mock<IUserViewManager>();
+        views.Setup(x => x.GetUserViews(It.IsAny<UserViewQuery>())).Returns(Array.Empty<UserView>());
+        foreach (var user in users)
+        {
+            manager.Setup(x => x.GetUserById(user.Id)).Returns(user);
+            var handler = Handler(manager.Object, views: views.Object);
+            var root = Browse(handler, "0", 0, 10);
+            var didl = XElement.Parse(root.Element("Result")!.Value);
+            var id = didl.Elements().Single(x => x.Elements().Any(e => e.Name.LocalName == "title" && e.Value == user.Username)).Attribute("id")!.Value;
+            Browse(handler, id, 0, 10);
+            views.Verify(x => x.GetUserViews(It.Is<UserViewQuery>(q => q.User == user)), Times.Once);
+            var builder = (DidlBuilder)typeof(ControlHandler).GetField("_didlBuilder", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(handler)!;
+            Assert.Same(user, builder.User);
+            Assert.StartsWith($"u_{user.Id:N}_", builder.GetClientId(Guid.NewGuid(), null), StringComparison.Ordinal);
+        }
     }
 
     private static User NewUser(string name) => new(name, "password", "reset") { Id = Guid.NewGuid() };
 
-    private static ControlHandler Handler(IUserManager manager, User? user = null)
+    private static ControlHandler Handler(IUserManager manager, User? user = null, IUserViewManager? views = null)
     {
         var library = new Mock<ILibraryManager>();
         library.Setup(x => x.GetUserRootFolder()).Returns(new UserRootFolder { Id = Guid.NewGuid() });
         return new ControlHandler(NullLogger.Instance, library.Object, new DlnaDeviceProfile(), "http://localhost", null,
             Mock.Of<IImageProcessor>(), Mock.Of<IUserDataManager>(), user, 1, null!, Mock.Of<IMediaSourceManager>(),
-            Mock.Of<IUserViewManager>(), Mock.Of<IMediaEncoder>(), Mock.Of<ITVSeriesManager>(), manager);
+            views ?? Mock.Of<IUserViewManager>(), Mock.Of<IMediaEncoder>(), Mock.Of<ITVSeriesManager>(), manager);
     }
 
     private static XElement Browse(ControlHandler handler, string id, int start, int count)

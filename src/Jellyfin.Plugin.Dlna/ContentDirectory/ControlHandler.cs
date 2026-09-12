@@ -53,7 +53,6 @@ public class ControlHandler : BaseControlHandler
     private readonly ILibraryManager _libraryManager;
     private readonly IUserDataManager _userDataManager;
     private User? _user;
-    private readonly Guid? _configuredUserId;
     private readonly IUserViewManager _userViewManager;
     private readonly ITVSeriesManager _tvSeriesManager;
     private readonly IUserManager _userManager;
@@ -103,7 +102,6 @@ public class ControlHandler : BaseControlHandler
         _libraryManager = libraryManager;
         _userDataManager = userDataManager;
         _user = user;
-        _configuredUserId = user?.Id;
         _userManager = userManager;
         _systemUpdateId = systemUpdateId;
         _userViewManager = userViewManager;
@@ -358,7 +356,9 @@ public class ControlHandler : BaseControlHandler
 
                 if (IsWrittenAsContainer(serverItem))
                 {
-                    var childCount = GetChildCounts([serverItem], null, sortCriteria)[0];
+                    var childCount = DidlBuilder.IsIdRoot(id)
+                        ? _userManager.GetUsers().Count()
+                        : GetChildCounts([serverItem], null, sortCriteria)[0];
 
                     _didlBuilder.WriteFolderElement(writer, item, serverItem.StubType, null, childCount, filter, id, serverItem.AncestorId);
                 }
@@ -369,7 +369,7 @@ public class ControlHandler : BaseControlHandler
 
                 provided++;
             }
-            else if (_configuredUserId is null && (id == "0" || DidlBuilder.IsIdRoot(id)))
+            else if (id == "0" || DidlBuilder.IsIdRoot(id))
             {
                 var users = _userManager.GetUsers().OrderBy(u => u.Username, StringComparer.OrdinalIgnoreCase).ThenBy(u => u.Id).ToList();
                 totalCount = users.Count;
@@ -1687,11 +1687,6 @@ public class ControlHandler : BaseControlHandler
                 var userIdStr = id.Substring(2, nextUnderscore - 2);
                 if (Guid.TryParse(userIdStr, out var userId))
                 {
-                    if (_configuredUserId.HasValue && userId != _configuredUserId.Value)
-                    {
-                        throw new InvalidOperationException("This DLNA device is assigned to a different user.");
-                    }
-
                     var user = _userManager.GetUserById(userId);
                     if (user != null)
                     {

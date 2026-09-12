@@ -81,3 +81,13 @@ build with zero warnings/errors, and JavaScript syntax validation pass. The
 blocked-callback test also coalesces 10,000 pending updates and verifies another
 user/device remains responsive. These deterministic tests do not replace the
 remaining live phone/browser check.
+
+## User-selection flow correction — 2026-09-12
+
+The owner clarified that DLNA must always open with the user picker, then show
+that user's normal media landing screen. The configured-user shortcut restored
+in the review above contradicted that requirement and has been removed. Legacy
+profile/default user values no longer bypass the picker. Root metadata counts
+users, and selecting a user retains their identity in child IDs and media URLs.
+The updated 29-test suite replaces the two fixed-user tests with a test selecting
+each of two users and verifying their normal user views and child identity.

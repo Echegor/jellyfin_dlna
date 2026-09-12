@@ -54,9 +54,10 @@ updates, and clears. Allow roughly 10–11 seconds after stopping for session cl
 Use a video whose watched state was not altered by an earlier test, or record its
 existing state before testing. The tracker never clears an existing watched flag.
 
-An explicit device-profile user takes precedence over the plugin default user.
-With neither configured, the root shows the paginated user picker. Invalid or
-deleted configured users require correcting the setting before browsing.
+Opening pi5 through DLNA always shows the paginated user picker. Selecting a user
+opens their normal media landing screen; child IDs and media URLs retain that
+user for personalized browsing and playback tracking. Legacy profile/default
+user settings do not bypass selection.
 
 ## Tracking policy and limits
 
