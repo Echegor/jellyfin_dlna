@@ -17,6 +17,10 @@ namespace Jellyfin.Plugin.Dlna.Playback;
 /// <summary>Owns inferred playback sessions independently of HTTP request scopes.</summary>
 public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReporter
 {
+    // Time-Gate for DLNA completion: how long a session must be active before it can be marked as watched.
+    // Set to 10 seconds for testing (production default should be 3 minutes).
+    private static readonly TimeSpan MinimumSessionDuration = TimeSpan.FromSeconds(10);
+
     private readonly IServiceScopeFactory _scopes;
     private readonly BufferedPlaybackReporter _reports;
     private readonly ILogger<PlaybackTrackingService> _logger;
@@ -181,8 +185,8 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
         var isWatched = false;
         if (configuration.MaxResumePct > 0 && (double)position / identity.DurationTicks * 100 >= configuration.MaxResumePct)
         {
-            // Time-Gate: only trust completion if the session was active for at least 3 minutes
-            if (sessionDuration >= TimeSpan.FromMinutes(3))
+            // Time-Gate: only trust completion if the session was active for the minimum duration
+            if (sessionDuration >= MinimumSessionDuration)
             {
                 isWatched = true;
             }
@@ -200,7 +204,13 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
                 || (double)position / identity.DurationTicks * 100 < configuration.MinResumePct ? 0 : position;
         }
 
-        manager.SaveUserData(user, item, data, UserDataSaveReason.PlaybackProgress, CancellationToken.None);
+        var reason = isWatched ? UserDataSaveReason.PlaybackFinished : UserDataSaveReason.PlaybackProgress;
+        if (isWatched)
+        {
+            data.LastPlayedDate = DateTime.UtcNow;
+        }
+
+        manager.SaveUserData(user, item, data, reason, CancellationToken.None);
         _logger.LogDebug("DLNA trace item={ItemId} user={UserId} action=resume-saved resumeTicks={Ticks} played={Played} sessionDuration={Duration}", identity.ItemId, identity.UserId, data.PlaybackPositionTicks, data.Played, sessionDuration);
     }
 }
