@@ -20,7 +20,7 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
     private readonly IServiceScopeFactory _scopes;
     private readonly BufferedPlaybackReporter _reports;
     private readonly ILogger<PlaybackTrackingService> _logger;
-    private readonly ConcurrentDictionary<(Guid User, string Device), string> _sessions = new();
+    private readonly ConcurrentDictionary<(Guid User, string Device), (string SessionId, DateTime StartedAt)> _sessions = new();
 
     /// <summary>Initializes a new instance of the <see cref="PlaybackTrackingService"/> class.</summary>
     /// <param name="scopes">Scope factory for independent reporting lifetimes.</param>
@@ -44,7 +44,11 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
         var user = scope.ServiceProvider.GetRequiredService<IUserManager>().GetUserById(identity.UserId)
             ?? throw new InvalidOperationException("DLNA playback user no longer exists.");
         var session = await sessions.LogSessionActivity("DLNA", "1.0.0", identity.DeviceId, "DLNA Client", identity.RemoteAddress, user).ConfigureAwait(false);
-        _sessions[(identity.UserId, identity.DeviceId)] = session.Id;
+        if (!_sessions.TryGetValue((identity.UserId, identity.DeviceId), out var current) || current.SessionId != session.Id)
+        {
+            _sessions[(identity.UserId, identity.DeviceId)] = (session.Id, DateTime.UtcNow);
+        }
+
         // A failed event subscriber may throw after Jellyfin has already applied start.
         // Checking the resulting state makes a retry safe in that case.
         if (session.NowPlayingItem?.Id != identity.ItemId)
@@ -78,7 +82,8 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
         using var scope = _scopes.CreateScope();
         var sessions = scope.ServiceProvider.GetRequiredService<ISessionManager>();
         await StartAsync(identity, positionTicks).ConfigureAwait(false);
-        var sessionId = _sessions[(identity.UserId, identity.DeviceId)];
+        var currentSession = _sessions[(identity.UserId, identity.DeviceId)];
+        var sessionId = currentSession.SessionId;
         var session = sessions.Sessions.First(candidate => candidate.Id == sessionId);
         session.LastPlaybackCheckIn = DateTime.UtcNow;
 
@@ -95,7 +100,7 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
             IsPaused = false
             },
             true).ConfigureAwait(false);
-        SaveResume(scope.ServiceProvider, identity, positionTicks);
+        SaveResume(scope.ServiceProvider, identity, positionTicks, TimeSpan.Zero);
         _logger.LogDebug("DLNA trace session={SessionId} item={ItemId} action=progress-completed estimatedTicks={Ticks} nowPlaying={NowPlaying} sessionTicks={SessionTicks}", sessionId, identity.ItemId, positionTicks, session.NowPlayingItem?.Id, session.PlayState?.PositionTicks);
     }
 
@@ -103,15 +108,16 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
     public async Task StopAsync(PlaybackIdentity identity, long positionTicks)
     {
         using var scope = _scopes.CreateScope();
-        SaveResume(scope.ServiceProvider, identity, positionTicks);
         var sessions = scope.ServiceProvider.GetRequiredService<ISessionManager>();
-        if (_sessions.TryGetValue((identity.UserId, identity.DeviceId), out var sessionId))
+        if (_sessions.TryGetValue((identity.UserId, identity.DeviceId), out var currentSession))
         {
+            var elapsedTime = DateTime.UtcNow - currentSession.StartedAt;
+            SaveResume(scope.ServiceProvider, identity, positionTicks, elapsedTime);
             // HTTP cannot confirm playback completion. End this synthetic session,
             // rather than emit a PlaybackStopped event with fabricated completion data.
-            await sessions.ReportSessionEnded(sessionId).ConfigureAwait(false);
+            await sessions.ReportSessionEnded(currentSession.SessionId).ConfigureAwait(false);
             _sessions.TryRemove((identity.UserId, identity.DeviceId), out _);
-            _logger.LogDebug("DLNA trace session={SessionId} item={ItemId} action=session-ended estimatedTicks={Ticks}", sessionId, identity.ItemId, positionTicks);
+            _logger.LogDebug("DLNA trace session={SessionId} item={ItemId} action=session-ended estimatedTicks={Ticks} sessionDuration={Duration}", currentSession.SessionId, identity.ItemId, positionTicks, elapsedTime);
         }
     }
 
@@ -153,7 +159,7 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
         }
     }
 
-    private void SaveResume(IServiceProvider services, PlaybackIdentity identity, long positionTicks)
+    private void SaveResume(IServiceProvider services, PlaybackIdentity identity, long positionTicks, TimeSpan sessionDuration)
     {
         var user = services.GetRequiredService<IUserManager>().GetUserById(identity.UserId);
         var item = services.GetRequiredService<ILibraryManager>().GetItemById(identity.ItemId);
@@ -171,10 +177,30 @@ public sealed class PlaybackTrackingService : BackgroundService, IPlaybackReport
 
         var configuration = services.GetRequiredService<IServerConfigurationManager>().Configuration;
         var position = Math.Clamp(positionTicks, 0, identity.DurationTicks);
-        data.PlaybackPositionTicks = identity.DurationTicks < TimeSpan.FromSeconds(configuration.MinResumeDurationSeconds).Ticks
-            || (double)position / identity.DurationTicks * 100 < configuration.MinResumePct ? 0 : position;
-        // Preserve Played and PlayCount. Reading the end of a file is not completion.
+
+        var isWatched = false;
+        if (configuration.MaxResumePct > 0 && (double)position / identity.DurationTicks * 100 >= configuration.MaxResumePct)
+        {
+            // Time-Gate: only trust completion if the session was active for at least 3 minutes
+            if (sessionDuration >= TimeSpan.FromMinutes(3))
+            {
+                isWatched = true;
+            }
+        }
+
+        if (isWatched)
+        {
+            data.PlaybackPositionTicks = 0;
+            data.Played = true;
+            data.PlayCount++;
+        }
+        else
+        {
+            data.PlaybackPositionTicks = identity.DurationTicks < TimeSpan.FromSeconds(configuration.MinResumeDurationSeconds).Ticks
+                || (double)position / identity.DurationTicks * 100 < configuration.MinResumePct ? 0 : position;
+        }
+
         manager.SaveUserData(user, item, data, UserDataSaveReason.PlaybackProgress, CancellationToken.None);
-        _logger.LogDebug("DLNA trace item={ItemId} user={UserId} action=resume-saved resumeTicks={Ticks} played={Played}", identity.ItemId, identity.UserId, data.PlaybackPositionTicks, data.Played);
+        _logger.LogDebug("DLNA trace item={ItemId} user={UserId} action=resume-saved resumeTicks={Ticks} played={Played} sessionDuration={Duration}", identity.ItemId, identity.UserId, data.PlaybackPositionTicks, data.Played, sessionDuration);
     }
 }
